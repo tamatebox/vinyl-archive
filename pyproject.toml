@@ -1,0 +1,27 @@
+[project]
+name = "vinyl-archive"
+version = "0.1.0"
+description = "Continuous audio capture server for archiving vinyl records"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "soundfile>=0.12",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vinyl_archive"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

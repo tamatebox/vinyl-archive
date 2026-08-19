@@ -1,0 +1,55 @@
+# vinyl-archive configuration
+# Copy to /etc/vinyl-archive/config.toml (or point VINYL_ARCHIVE_CONFIG at it).
+
+[server]
+host = "0.0.0.0"
+port = 8000
+
+[paths]
+# buffer/, recordings/, db/ are created under this directory.
+data_dir = "/var/lib/vinyl-archive"
+
+[audio]
+sample_rate = 48000
+channels = 2
+# ADC bit depth: 16 (ALSA S16_LE) or 24 (packed S24_3LE). The device must
+# support the format natively — check with: arecord -D <device> --dump-hw-params
+bit_depth = 16
+
+[capture]
+# ALSA device. Use the card NAME (see /proc/asound/cards), not the index —
+# indexes change with USB enumeration order.
+device = "hw:CARD=CODEC"
+# Start capturing automatically on boot.
+auto_start = true
+# Write to disk only while a session is active. While the input is idle,
+# audio is held in a small RAM delay line (sized to the detector preroll)
+# and dropped, so idle hours cost zero flash wear. Track gaps inside a
+# session are still recorded. Set false to buffer everything continuously.
+silence_gating = true
+# Override the capture command entirely (list of argv strings). The command
+# must write raw little-endian interleaved PCM to stdout matching [audio]
+# (S16_LE for bit_depth 16, packed S24_3LE for 24). Used for development
+# without ALSA:
+# command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "sine=frequency=440:duration=600", "-ac", "2", "-ar", "48000", "-f", "s16le", "-"]
+
+[ring]
+# 60 s * 200 segments ≈ 3 h 20 min of temporary buffer.
+segment_seconds = 60
+max_segments = 200
+# Segments fully covered by a saved recording are deleted after this grace period.
+released_grace_seconds = 300
+# Emergency deletion threshold for free disk space on the buffer volume.
+min_free_mb = 1024
+
+[detector]
+block_ms = 100
+start_threshold_dbfs = -40.0
+stop_threshold_dbfs = -48.0
+start_hold_seconds = 0.3
+# A session ends only after this much continuous silence — track gaps on a
+# record (2–5 s) never split a side.
+end_silence_seconds = 25.0
+preroll_seconds = 1.5
+postroll_seconds = 2.0
+min_session_seconds = 30.0

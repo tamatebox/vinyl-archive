@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vinyl-archive</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>vinyl-archive</h1>
+  <div id="status-bar">
+    <span id="capture-state" class="badge">--</span>
+    <div class="meter" title="Input level">
+      <div id="level-bar" class="meter-fill"></div>
+    </div>
+    <span id="level-text" class="mono">-- dBFS</span>
+    <span id="buffer-text" class="dim"></span>
+    <span class="spacer"></span>
+    <button id="btn-start" hidden>Start capture</button>
+    <button id="btn-stop" hidden class="secondary">Stop capture</button>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>Detected sessions</h2>
+    <div id="sessions" class="list"></div>
+  </section>
+
+  <section>
+    <h2>Saved recordings</h2>
+    <div id="recordings" class="list"></div>
+  </section>
+
+  <section>
+    <details id="settings">
+      <summary>Settings</summary>
+      <form id="settings-form">
+        <div class="fields">
+          <label>Start threshold (dBFS)
+            <input type="number" step="0.5" name="start_threshold_dbfs"></label>
+          <label>Stop threshold (dBFS)
+            <input type="number" step="0.5" name="stop_threshold_dbfs"></label>
+          <label>Start hold (s)
+            <input type="number" step="0.1" min="0" name="start_hold_seconds"></label>
+          <label>End silence (s)
+            <input type="number" step="1" min="1" name="end_silence_seconds"></label>
+          <label>Pre-roll (s)
+            <input type="number" step="0.1" min="0" name="preroll_seconds"></label>
+          <label>Post-roll (s)
+            <input type="number" step="0.1" min="0" name="postroll_seconds"></label>
+          <label>Min session (s)
+            <input type="number" step="1" min="0" name="min_session_seconds"></label>
+          <label class="check">
+            <input type="checkbox" name="silence_gating">
+            Silence gating (write to disk only during sessions)</label>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Apply</button>
+          <span id="settings-msg" class="dim"></span>
+        </div>
+        <p class="dim">Applied immediately and persisted. Device, sample rate
+        and bit depth are set in config.toml (restart required).</p>
+      </form>
+    </details>
+  </section>
+</main>
+
+<footer>
+  <span id="disk-text" class="dim"></span>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

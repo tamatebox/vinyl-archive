@@ -1,0 +1,22 @@
+[Unit]
+Description=Vinyl Archive capture server
+After=sound.target network.target
+
+[Service]
+Type=exec
+User=vinyl
+Group=audio
+ExecStart=/opt/vinyl-archive/venv/bin/uvicorn vinyl_archive.main:app --host 0.0.0.0 --port 8000
+WorkingDirectory=/opt/vinyl-archive
+Restart=always
+RestartSec=3
+Environment=VINYL_ARCHIVE_CONFIG=/etc/vinyl-archive/config.toml
+
+# Hardening: the service may only write to its data directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vinyl-archive
+
+[Install]
+WantedBy=multi-user.target

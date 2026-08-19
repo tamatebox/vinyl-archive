@@ -1,0 +1,20 @@
+# Local development config: synthetic ffmpeg audio source, data in ./dev-data.
+# Run with: VINYL_ARCHIVE_CONFIG=dev-config.toml .venv/bin/uvicorn vinyl_archive.main:app
+
+[server]
+host = "127.0.0.1"
+port = 8000
+
+[paths]
+data_dir = "./dev-data"
+
+[capture]
+# Accelerated test signal: silence -> tone -> track gap -> tone -> silence.
+# Sessions appear within seconds. For real-time pacing (watch the level
+# meter move), prepend REALTIME=-re:
+# command = ["/bin/sh", "-c", "REALTIME=-re exec /bin/sh tools/make_test_audio.sh"]
+command = ["/bin/sh", "tools/make_test_audio.sh"]
+
+[ring]
+segment_seconds = 10
+max_segments = 100
