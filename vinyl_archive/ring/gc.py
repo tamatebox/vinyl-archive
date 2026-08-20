@@ -27,6 +27,10 @@ class RingGC:
         self._dir = buffer_dir
         self._cfg = cfg
 
+    def reconfigure(self, cfg: RingConfig) -> None:
+        """Apply new ring policy; takes effect on the next collect()."""
+        self._cfg = cfg
+
     def collect(self) -> None:
         try:
             self._collect()

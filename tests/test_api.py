@@ -83,6 +83,86 @@ def test_save_download_rename_delete_flow(client, config):
     assert not (config.recordings_dir / rec["filename"]).exists()
 
 
+def test_history_merges_sessions_and_recordings(client, config):
+    sid = seed_session(client.app, config)
+
+    items = client.get("/api/history").json()
+    assert len(items) == 1
+    assert items[0]["type"] == "session"
+    assert items[0]["status"] == "buffered"
+    assert items[0]["permanent"] is False
+    assert items[0]["kind"] == "auto"
+    assert items[0]["audio_url"] == f"/api/sessions/{sid}/audio"
+
+    client.post(f"/api/sessions/{sid}/save", json={"label": "Side A"})
+    items = wait_for(lambda: [i for i in client.get("/api/history").json()
+                             if i["status"] == "saved"])
+    # The saved entry replaces the buffered one instead of duplicating it.
+    assert len(client.get("/api/history").json()) == 1
+    assert items[0]["type"] == "recording"
+    assert items[0]["label"] == "Side A"
+    assert items[0]["permanent"] is True
+    assert items[0]["start_utc"] == client.get("/api/sessions").json()[0]["start_utc"]
+
+
+def test_session_audio_streams_wav_without_saving(client, config):
+    sid = seed_session(client.app, config)
+
+    res = client.get(f"/api/sessions/{sid}/audio")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "audio/wav"
+    assert res.headers["accept-ranges"] == "bytes"
+
+    body = res.content
+    assert body[:4] == b"RIFF" and body[8:12] == b"WAVE"
+    frames = 2 * RATE - 1000
+    assert len(body) == 44 + frames * 4  # 16-bit stereo
+    assert int(res.headers["content-length"]) == len(body)
+    # Streaming must not create files.
+    assert not list(config.recordings_dir.iterdir())
+
+    # ...and the audio matches what was captured (seeded with constant 1000).
+    samples = np.frombuffer(body[44:], dtype="<i2")
+    assert np.all(samples == 1000)
+
+
+def test_session_audio_supports_range_requests(client, config):
+    """Range support is what makes the player seekable for a 20-minute side."""
+    sid = seed_session(client.app, config)
+    full = client.get(f"/api/sessions/{sid}/audio").content
+
+    res = client.get(f"/api/sessions/{sid}/audio",
+                     headers={"Range": "bytes=100-199"})
+    assert res.status_code == 206
+    assert res.headers["content-range"] == f"bytes 100-199/{len(full)}"
+    assert res.content == full[100:200]
+
+    res = client.get(f"/api/sessions/{sid}/audio", headers={"Range": "bytes=20-"})
+    assert res.status_code == 206
+    assert res.content == full[20:]
+
+    assert client.get(f"/api/sessions/{sid}/audio",
+                      headers={"Range": f"bytes={len(full)}-"}).status_code == 416
+
+
+def test_dismiss_buffered_session(client, config):
+    sid = seed_session(client.app, config)
+    assert client.delete(f"/api/sessions/{sid}").status_code == 204
+    assert client.get("/api/history").json() == []
+    # Only the history entry goes; the buffer is reclaimed on its own schedule.
+    assert client.app.state.db.list_segments()
+
+
+def test_dismiss_active_session_409(client):
+    sid = client.app.state.db.create_session(0, utcnow_iso())
+    assert client.delete(f"/api/sessions/{sid}").status_code == 409
+
+
+def test_manual_record_requires_running_capture(client):
+    assert client.post("/api/record/start").status_code == 409
+    assert client.post("/api/record/stop").status_code == 409
+
+
 def test_save_unknown_session_404(client):
     assert client.post("/api/sessions/999/save").status_code == 404
 
@@ -116,17 +196,45 @@ def test_settings_patch_applies_and_persists(client, config):
 
 
 def test_settings_patch_rejects_bad_values(client):
+    # data_dir is deliberately not runtime-editable
     assert client.patch("/api/settings",
-                        json={"bit_depth": 24}).status_code == 422
+                        json={"data_dir": "/tmp/x"}).status_code == 422
     assert client.patch("/api/settings",
                         json={"end_silence_seconds": "long"}).status_code == 422
     assert client.patch("/api/settings",
                         json={"preroll_seconds": -1}).status_code == 422
+    assert client.patch("/api/settings",
+                        json={"bit_depth": 32}).status_code == 422
+    assert client.patch("/api/settings",
+                        json={"sample_rate": 48000.5}).status_code == 422
+    assert client.patch("/api/settings", json={"device": " "}).status_code == 422
     # stop threshold must stay at or below the start threshold
     assert client.patch("/api/settings",
                         json={"stop_threshold_dbfs": -30.0}).status_code == 422
     # nothing was applied
     assert client.get("/api/settings").json()["stop_threshold_dbfs"] == -48.0
+
+
+def test_audio_format_change_requires_restart(client):
+    res = client.patch("/api/settings", json={"bit_depth": 24})
+    assert res.status_code == 200
+    assert res.json()["restart_required"] is True
+    # capture keeps running in the old format until restarted
+    assert client.get("/api/status").json()["format"]["bit_depth"] == 16
+    assert client.get("/api/settings").json()["restart_required"] is True
+
+
+def test_format_change_discards_incompatible_buffer(client, config):
+    """After a restart in a new format, old-format segments must not linger:
+    exports would otherwise mix formats."""
+    seed_session(client.app, config)
+    assert client.app.state.db.list_segments()
+    client.patch("/api/settings", json={"bit_depth": 24})
+
+    with TestClient(create_app(config)) as c2:
+        assert c2.app.state.db.list_segments() == []
+        assert c2.get("/api/status").json()["format"]["bit_depth"] == 24
+        assert not list(config.buffer_dir.glob("*.flac"))
 
 
 def test_capture_start_stop_endpoints(client):
@@ -135,3 +243,64 @@ def test_capture_start_stop_endpoints(client):
     assert client.post("/api/capture/start").status_code == 200
     # config's capture command exits immediately; just verify it settles back.
     assert client.post("/api/capture/stop").status_code == 200
+
+
+def test_ring_settings_apply_live(client):
+    before = client.get("/api/status").json()["buffer"]["capacity_seconds"]
+    res = client.patch("/api/settings",
+                       json={"max_segments": 10, "segment_seconds": 30})
+    assert res.status_code == 200
+    assert res.json()["restart_required"] is False  # ring policy needs no restart
+    after = client.get("/api/status").json()["buffer"]["capacity_seconds"]
+    assert (before, after) != (300, 300) and after == 300
+
+
+def test_backoff_bounds_are_cross_checked(client):
+    assert client.patch("/api/settings",
+                        json={"restart_backoff_min_s": 30.0,
+                              "restart_backoff_max_s": 5.0}).status_code == 422
+    assert client.patch("/api/settings",
+                        json={"restart_backoff_min_s": 1.0,
+                              "restart_backoff_max_s": 20.0}).status_code == 200
+
+
+def test_every_editable_setting_round_trips(client):
+    """GET then PATCH the same payload back: every advertised setting must be
+    accepted by its own validator."""
+    current = client.get("/api/settings").json()
+    current.pop("restart_required")
+    res = client.patch("/api/settings", json=current)
+    assert res.status_code == 200, res.json()
+    echoed = res.json()
+    echoed.pop("restart_required")
+    assert echoed == current
+
+
+def test_config_fields_are_classified():
+    """Every config field is either web-editable or deliberately file-only.
+
+    Adding a field to config.py forces a decision here rather than silently
+    landing as an unreachable setting.
+    """
+    import dataclasses
+
+    from vinyl_archive.config import EDITABLE_SETTINGS, Config
+
+    file_only = {
+        "host", "port",              # a bad binding locks the UI out
+        "command",                   # argv from an unauthenticated UI is RCE
+        "data_dir",                  # the settings store lives under it
+        "recordings_dir_override",   # moving it orphans existing recordings
+    }
+    cfg = Config()
+    names = set()
+    for f in dataclasses.fields(cfg):
+        section = getattr(cfg, f.name)
+        if dataclasses.is_dataclass(section):
+            names |= {sf.name for sf in dataclasses.fields(section)}
+        else:
+            names.add(f.name)
+
+    unclassified = names - set(EDITABLE_SETTINGS) - file_only
+    assert not unclassified, f"classify these in EDITABLE_SETTINGS or file_only: {unclassified}"
+    assert file_only.isdisjoint(EDITABLE_SETTINGS)

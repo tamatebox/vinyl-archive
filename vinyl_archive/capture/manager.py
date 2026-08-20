@@ -24,6 +24,9 @@ class CaptureManager:
 
     def __init__(self, config: Config, db: Database):
         self._config = config
+        # The format the writer and buffer segments were built with. Format
+        # changes need a restart, so this never follows apply_config().
+        self._running_audio = config.audio
         self._db = db
         rate = config.audio.sample_rate
 
@@ -47,11 +50,16 @@ class CaptureManager:
         if config.capture.auto_start:
             self._enabled.set()
         self._stop = threading.Event()
+        self._restart_source = threading.Event()
+        self._session_lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
         self._state = "stopped"
         self._level_dbfs = SILENCE_FLOOR_DBFS
         self._current_session_id: int | None = None
+        # Set while a session (auto or manual) is open; drives silence gating.
+        self._session_start_sample: int | None = None
+        self._manual = False
         self._anchor_wall = time.time()
         self._anchor_sample = self._writer.position
         self._started_at = time.time()
@@ -85,23 +93,112 @@ class CaptureManager:
             return None
         return self._block_frames + int(
             (cfg.detector.preroll_seconds + cfg.detector.start_hold_seconds)
-            * cfg.audio.sample_rate)
+            * self._running_audio.sample_rate)
 
     # -- API-facing --------------------------------------------------------
 
     def apply_config(self, config: Config) -> None:
-        """Apply runtime-editable settings live (detector tuning, gating)."""
+        """Apply runtime-editable settings live (detector tuning, gating,
+        capture device). Audio-format changes need a restart and are ignored
+        here — the API reports that back to the caller."""
+        old = self._config
         self._config = config
         self._detector.reconfigure(config.detector)
+        self._gc.reconfigure(config.ring)
+        # Segment length is derived from the *running* rate: a pending
+        # sample-rate change must not resize segments before the restart.
+        self._writer.set_segment_frames(
+            config.ring.segment_seconds * self._running_audio.sample_rate)
+        self._block_frames = max(
+            1, config.detector.block_ms * self._running_audio.sample_rate // 1000)
         self._gate_frames = self._compute_gate_frames()
+        if (config.capture.device != old.capture.device
+                or config.detector.block_ms != old.detector.block_ms):
+            # Cycle the source process: the device is opened once per run, and
+            # the recorder reads its block size once per run.
+            self._restart_source.set()
+
+    def running_config(self):
+        """The audio format capture is actually running with."""
+        return self._running_audio
+
+    def flushed_end(self) -> int:
+        """End sample of audio durably closed into segments."""
+        return self._writer.flushed_end()
+
+    def gate_state(self) -> tuple[bool, int]:
+        """(session open, its start sample) — what the recorder gates on."""
+        start = self._session_start_sample
+        return start is not None, start or 0
+
+    # -- manual recording --------------------------------------------------
+
+    def manual_start(self) -> int | None:
+        """Begin an explicit recording, taking over from auto-detection.
+
+        An auto session already in progress is promoted (keeping its
+        pre-roll) rather than duplicated. Returns the session id, or None if
+        capture is not running.
+        """
+        with self._session_lock:
+            if self._state != "recording" or self._manual:
+                return self._current_session_id if self._manual else None
+            self._manual = True
+            if self._current_session_id is not None:
+                self._db.set_session_kind(self._current_session_id, "manual")
+                log.info("session %d promoted to manual", self._current_session_id)
+                return self._current_session_id
+
+            pos = self._writer.position
+            preroll = int(self._config.detector.preroll_seconds
+                          * self._config.audio.sample_rate)
+            start = max(0, pos - preroll)  # lead-in still sits in the RAM delay line
+            self._current_session_id = self._db.create_session(
+                start, self._wall_at(start), kind="manual")
+            self._session_start_sample = start
+            log.info("manual session %d started at sample %d",
+                     self._current_session_id, start)
+            return self._current_session_id
+
+    def manual_stop(self) -> int | None:
+        """End the explicit recording; auto-detection resumes afterwards."""
+        with self._session_lock:
+            if not self._manual:
+                return None
+            session_id = self._current_session_id
+            pos = self._writer.position
+            if session_id is not None:
+                self._db.close_session(session_id, pos, self._wall_at(pos))
+                log.info("manual session %d ended at sample %d", session_id, pos)
+            self._current_session_id = None
+            self._session_start_sample = None
+            # Re-arm the detector so backup coverage resumes immediately even
+            # if playback continues (callbacks are still suppressed here).
+            self._detector.force_close(pos)
+            self._manual = False
+            return session_id
+
+    @property
+    def manual_recording(self) -> bool:
+        return self._manual
 
     def status(self) -> dict:
         buffered = self._db.buffered_frames()
-        rate = self._config.audio.sample_rate
+        # The running format, not the configured one: buffered audio is in the
+        # format capture actually started with.
+        audio = self._running_audio
+        rate = audio.sample_rate
         return {
             "capture": self._state,
             "level_dbfs": round(self._level_dbfs, 1),
             "active_session_id": self._current_session_id,
+            "manual_recording": self._manual,
+            "device": self._config.capture.device,
+            "format": {
+                "sample_rate": audio.sample_rate,
+                "channels": audio.channels,
+                "bit_depth": audio.bit_depth,
+            },
             "buffer": {
                 "seconds": round(buffered / rate, 1),
                 "capacity_seconds": self._config.ring.max_segments
@@ -137,25 +234,35 @@ class CaptureManager:
             / self._config.audio.sample_rate
         return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # A manual recording owns the session; detection keeps running (to re-arm
+    # correctly) but must not open, close or discard sessions behind its back.
+
     def _on_session_start(self, start_sample: int) -> None:
+        if self._manual:
+            return
         self._current_session_id = self._db.create_session(
             start_sample, self._wall_at(start_sample))
+        self._session_start_sample = start_sample
         log.info("session %d started at sample %d",
                  self._current_session_id, start_sample)
 
     def _on_session_end(self, end_sample: int) -> None:
-        if self._current_session_id is None:
+        if self._manual or self._current_session_id is None:
             return
         self._db.close_session(self._current_session_id, end_sample,
                                self._wall_at(end_sample))
         log.info("session %d ended at sample %d",
                  self._current_session_id, end_sample)
         self._current_session_id = None
+        self._session_start_sample = None
 
     def _on_session_discard(self) -> None:
+        if self._manual:
+            return
         if self._current_session_id is not None:
             self._db.delete_session(self._current_session_id)
             self._current_session_id = None
+        self._session_start_sample = None
 
     # -- supervisor loop ----------------------------------------------------
 
@@ -170,9 +277,9 @@ class CaptureManager:
         self._level_dbfs = level
 
     def _run(self) -> None:
-        cap = self._config.capture
-        backoff = cap.restart_backoff_min_s
+        backoff = self._config.capture.restart_backoff_min_s
         while not self._stop.is_set():
+            cap = self._config.capture  # re-read: the device is editable live
             if not self._enabled.is_set():
                 self._set_state("stopped")
                 self._stop.wait(0.5)
@@ -183,6 +290,7 @@ class CaptureManager:
                 self._stop.wait(2.0)
                 continue
 
+            self._restart_source.clear()
             source = SubprocessSource(cap.build_command(self._config.audio))
             try:
                 source.start()
@@ -204,8 +312,11 @@ class CaptureManager:
                 source, self._writer, self._detector,
                 self._block_frames, self._config.audio,
                 on_level=self._set_level,
-                should_stop=lambda: self._stop.is_set() or not self._enabled.is_set(),
+                should_stop=lambda: (self._stop.is_set()
+                                     or not self._enabled.is_set()
+                                     or self._restart_source.is_set()),
                 gate_frames=lambda: self._gate_frames,
+                gate_state=self.gate_state,
             )
             try:
                 recorder.run()
@@ -214,10 +325,16 @@ class CaptureManager:
             finally:
                 source.stop()
                 self._writer.close()
+                if self._manual:
+                    self.manual_stop()  # a capture gap ends an explicit take
                 self._detector.force_close(self._writer.position)
                 self._gc.collect()
 
             if self._stop.is_set() or not self._enabled.is_set():
+                continue
+
+            if self._restart_source.is_set():
+                log.info("restarting capture source (settings changed)")
                 continue
 
             if time.time() - run_started > 60:

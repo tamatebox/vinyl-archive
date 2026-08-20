@@ -6,10 +6,10 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from ..config import validate_settings
+from ..config import restart_required, validate_settings
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +18,10 @@ router = APIRouter(prefix="/api")
 
 class LabelUpdate(BaseModel):
     label: str
+
+
+class SaveRequest(BaseModel):
+    label: str = ""
 
 
 def _session_json(sess: dict, sample_rate: int) -> dict:
@@ -29,6 +33,7 @@ def _session_json(sess: dict, sample_rate: int) -> dict:
         "end_utc": sess["end_utc"],
         "duration_s": duration,
         "state": sess["state"],
+        "kind": sess["kind"],
         "truncated_head": bool(sess["truncated_head"]),
     }
 
@@ -45,7 +50,8 @@ def list_sessions(request: Request) -> list[dict]:
 
 
 @router.post("/sessions/{session_id}/save", status_code=202)
-async def save_session(session_id: int, request: Request) -> dict:
+async def save_session(session_id: int, request: Request,
+                       body: SaveRequest | None = None) -> dict:
     db = request.app.state.db
     sess = db.get_session(session_id)
     if sess is None:
@@ -55,10 +61,121 @@ async def save_session(session_id: int, request: Request) -> dict:
 
     exporter = request.app.state.exporter
     loop = asyncio.get_running_loop()
+    label = (body.label if body else "").strip()
     future = loop.run_in_executor(request.app.state.export_pool,
-                                  exporter.export, session_id)
+                                  exporter.export, session_id, label)
     future.add_done_callback(_log_export_result)
     return {"status": "saving", "session_id": session_id}
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+def delete_session(session_id: int, request: Request) -> None:
+    """Drop a buffered session from the history. Its audio stays in the ring
+    buffer until the normal rotation reclaims it."""
+    db = request.app.state.db
+    sess = db.get_session(session_id)
+    if sess is None:
+        raise HTTPException(404, "session not found")
+    if sess["state"] == "saving":
+        raise HTTPException(409, "session is being saved")
+    if sess["state"] == "active":
+        raise HTTPException(409, "session is still recording")
+    db.delete_session(session_id)
+
+
+@router.get("/sessions/{session_id}/audio")
+def stream_session(session_id: int, request: Request):
+    """Serve a buffered session as WAV, straight from the ring buffer.
+
+    Nothing is written to disk, and byte ranges map onto samples, so the
+    player can seek freely without the session having been saved first.
+    """
+    db = request.app.state.db
+    sess = db.get_session(session_id)
+    if sess is None:
+        raise HTTPException(404, "session not found")
+
+    streamer = request.app.state.streamer
+    start, end = streamer.resolve_range(sess)
+    total = streamer.wav_size(end - start)
+    if end <= start:
+        raise HTTPException(410, "no buffered audio remains for this session")
+
+    byte_start, byte_end = 0, total
+    status_code = 200
+    headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-store"}
+    range_header = request.headers.get("range")
+    if range_header and range_header.startswith("bytes="):
+        spec = range_header.removeprefix("bytes=").split(",")[0]
+        first, _, last = spec.partition("-")
+        try:
+            byte_start = int(first) if first else 0
+            byte_end = (int(last) + 1) if last else total
+        except ValueError:
+            raise HTTPException(416, "malformed range")
+        byte_start, byte_end = max(0, byte_start), min(total, byte_end)
+        if byte_start >= total or byte_end <= byte_start:
+            raise HTTPException(416, "range not satisfiable")
+        status_code = 206
+        headers["Content-Range"] = f"bytes {byte_start}-{byte_end - 1}/{total}"
+
+    headers["Content-Length"] = str(byte_end - byte_start)
+    name = f"session_{session_id}_{sess['start_utc'].replace(':', '')}.wav"
+    headers["Content-Disposition"] = f'inline; filename="{name}"'
+    return StreamingResponse(
+        streamer.iter_range(start, end, byte_start, byte_end),
+        status_code=status_code, media_type="audio/wav", headers=headers)
+
+
+@router.get("/history")
+def list_history(request: Request) -> list[dict]:
+    """Sessions and saved recordings as one timeline.
+
+    Both are playable and downloadable; the difference is only whether they
+    survive — buffered entries are reclaimed by the ring buffer eventually,
+    saved ones are kept until deleted by hand.
+    """
+    db = request.app.state.db
+    rate = request.app.state.config.audio.sample_rate
+    meta = db.session_meta()
+    items = []
+
+    for rec in db.list_recordings():
+        sess = meta.get(rec["session_id"]) or {}
+        items.append({
+            "type": "recording",
+            "id": rec["id"],
+            "label": rec["label"],
+            "start_utc": sess.get("start_utc") or rec["created_utc"],
+            "duration_s": rec["duration_s"],
+            "kind": sess.get("kind", "auto"),
+            "status": "saved",
+            "permanent": True,
+            "has_gaps": bool(rec["has_gaps"]),
+            "size_bytes": rec["size_bytes"],
+            "audio_url": f"/api/recordings/{rec['id']}/download",
+        })
+
+    for sess in db.unsaved_sessions():
+        end = sess["end_sample"]
+        items.append({
+            "type": "session",
+            "id": sess["id"],
+            "label": "",
+            "start_utc": sess["start_utc"],
+            "duration_s": (None if end is None else
+                           round((end - sess["start_sample"]) / rate, 1)),
+            "kind": sess["kind"],
+            "status": {"active": "recording",
+                       "saving": "saving"}.get(sess["state"], "buffered"),
+            "permanent": False,
+            "has_gaps": bool(sess["truncated_head"]),
+            "size_bytes": None,
+            "audio_url": f"/api/sessions/{sess['id']}/audio",
+        })
+
+    items.sort(key=lambda i: i["start_utc"], reverse=True)
+    return items
 
 
 def _log_export_result(future) -> None:
@@ -108,7 +225,31 @@ def delete_recording(recording_id: int, request: Request) -> None:
 
 @router.get("/settings")
 def get_settings(request: Request) -> dict:
-    return request.app.state.config.editable_values()
+    running = request.app.state.manager.running_config()
+    return {
+        **request.app.state.config.editable_values(),
+        "restart_required": restart_required(running,
+                                             request.app.state.config.audio),
+    }
+
+
+@router.post("/record/start")
+def record_start(request: Request) -> dict:
+    """Start an explicit recording. Takes precedence over auto-detection:
+    an auto session in progress is adopted instead of duplicated."""
+    manager = request.app.state.manager
+    session_id = manager.manual_start()
+    if session_id is None:
+        raise HTTPException(409, "capture is not running")
+    return {"status": "recording", "session_id": session_id}
+
+
+@router.post("/record/stop")
+def record_stop(request: Request) -> dict:
+    session_id = request.app.state.manager.manual_stop()
+    if session_id is None:
+        raise HTTPException(409, "no manual recording in progress")
+    return {"status": "stopped", "session_id": session_id}
 
 
 @router.patch("/settings")
@@ -117,12 +258,18 @@ def update_settings(body: dict, request: Request) -> dict:
         clean = validate_settings(body, request.app.state.config)
     except ValueError as e:
         raise HTTPException(422, str(e))
+    running = request.app.state.manager.running_config()
     new_config = request.app.state.config.with_settings(clean)
     request.app.state.db.set_settings(clean)
     request.app.state.config = new_config
     request.app.state.manager.apply_config(new_config)
     log.info("settings updated: %s", clean)
-    return new_config.editable_values()
+    return {
+        **new_config.editable_values(),
+        # Audio-format changes only take effect on restart; until then the
+        # buffer keeps its current format.
+        "restart_required": restart_required(running, new_config.audio),
+    }
 
 
 @router.post("/capture/start")

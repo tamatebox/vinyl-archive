@@ -162,3 +162,16 @@ def test_fully_evicted_session_expires(config, db):
 
     RingGC(db, config.buffer_dir, config.ring).collect()
     assert db.get_session(sid)["state"] == "expired"
+
+
+def test_set_segment_frames_changes_rotation_length(config, db):
+    w = make_writer(config, db)
+    w.append(frames(SEG))          # one 1 s segment
+    w.set_segment_frames(SEG // 4)  # shorten to 0.25 s
+    w.append(frames(SEG, offset=SEG))
+    w.close()
+
+    lengths = [s["n_frames"] for s in db.list_segments()]
+    # The first keeps its original length; later ones use the new one.
+    assert lengths[0] == SEG
+    assert lengths[1:] == [SEG // 4] * 4

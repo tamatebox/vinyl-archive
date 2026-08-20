@@ -33,11 +33,11 @@ class Exporter:
         self._manager = manager  # optional CaptureManager, for tail flushing
         self._lock = threading.Lock()  # serialize exports (Pi-friendly)
 
-    def export(self, session_id: int) -> dict:
+    def export(self, session_id: int, label: str = "") -> dict:
         with self._lock:
-            return self._export(session_id)
+            return self._export(session_id, label)
 
-    def _export(self, session_id: int) -> dict:
+    def _export(self, session_id: int, label: str = "") -> dict:
         sess = self._db.get_session(session_id)
         if sess is None:
             raise ExportError(f"session {session_id} not found")
@@ -75,6 +75,7 @@ class Exporter:
                 duration_s=round(frames_written / rate, 2),
                 size_bytes=out_path.stat().st_size,
                 has_gaps=has_gaps or bool(sess["truncated_head"]),
+                label=label,
             )
             self._db.set_session_state(session_id, "saved")
             self._release_covered_segments(start, end)

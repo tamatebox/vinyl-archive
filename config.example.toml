@@ -2,12 +2,18 @@
 # Copy to /etc/vinyl-archive/config.toml (or point VINYL_ARCHIVE_CONFIG at it).
 
 [server]
+# Where the web UI binds. Ports below 1024 need extra privileges the
+# service does not have (see AmbientCapabilities in the systemd unit).
 host = "0.0.0.0"
 port = 8000
 
 [paths]
 # buffer/, recordings/, db/ are created under this directory.
 data_dir = "/var/lib/vinyl-archive"
+# Optional: keep saved recordings on another volume (e.g. a USB drive) while
+# the database and ring buffer stay on the OS drive. Must be writable by the
+# service user, and listed in ReadWritePaths= in the systemd unit.
+# recordings_dir = "/mnt/music/vinyl"
 
 [audio]
 sample_rate = 48000

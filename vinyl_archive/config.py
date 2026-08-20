@@ -104,6 +104,9 @@ class DetectorConfig:
 @dataclass(frozen=True)
 class Config:
     data_dir: Path = Path("/var/lib/vinyl-archive")
+    # Saved recordings can live on a separate volume (e.g. a USB drive) while
+    # the DB and ring buffer stay on the OS drive. None: data_dir/recordings.
+    recordings_dir_override: Path | None = None
     server: ServerConfig = field(default_factory=ServerConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)
@@ -116,7 +119,7 @@ class Config:
 
     @property
     def recordings_dir(self) -> Path:
-        return self.data_dir / "recordings"
+        return self.recordings_dir_override or self.data_dir / "recordings"
 
     @property
     def db_path(self) -> Path:
@@ -132,17 +135,15 @@ class Config:
         Unknown keys are ignored so stale rows from an older schema can't
         break startup.
         """
-        def section(name: str) -> dict:
-            return {k: v for k, v in settings.items()
-                    if EDITABLE_SETTINGS.get(k, (None,))[0] == name}
+        by_section: dict[str, dict] = {}
+        for key, value in settings.items():
+            spec = EDITABLE_SETTINGS.get(key)
+            if spec:
+                by_section.setdefault(spec[0], {})[key] = value
 
         cfg = self
-        if det := section("detector"):
-            cfg = replace(cfg, detector=replace(cfg.detector, **det))
-        if cap := section("capture"):
-            cfg = replace(cfg, capture=replace(cfg.capture, **cap))
-        if aud := section("audio"):
-            cfg = replace(cfg, audio=replace(cfg.audio, **aud))
+        for name, values in by_section.items():
+            cfg = replace(cfg, **{name: replace(getattr(cfg, name), **values)})
         return cfg
 
     def editable_values(self) -> dict:
@@ -163,8 +164,10 @@ class Config:
         cap = dict(section("capture"))
         if "command" in cap:
             cap["command"] = tuple(cap["command"])
+        rec_dir = section("paths").get("recordings_dir")
         return cls(
             data_dir=Path(section("paths").get("data_dir", cls.data_dir)),
+            recordings_dir_override=Path(rec_dir) if rec_dir else None,
             server=ServerConfig(**section("server")),
             audio=AudioConfig(**section("audio")),
             capture=CaptureConfig(**cap),
@@ -187,18 +190,35 @@ EDITABLE_SETTINGS: dict[str, tuple] = {
     "preroll_seconds": ("detector", float, 0.0, 30.0),
     "postroll_seconds": ("detector", float, 0.0, 60.0),
     "min_session_seconds": ("detector", float, 0.0, 3600.0),
+    "block_ms": ("detector", int, 10, 1000),
     "silence_gating": ("capture", bool, None, None),
     "device": ("capture", str, None, None),
+    "auto_start": ("capture", bool, None, None),
+    "restart_backoff_min_s": ("capture", float, 0.1, 60.0),
+    "restart_backoff_max_s": ("capture", float, 0.1, 600.0),
     "sample_rate": ("audio", int, 8000, 192000),
     "channels": ("audio", int, 1, 8),
     "bit_depth": ("audio", int, None, None),  # choices enforced: 16 or 24
+    "segment_seconds": ("ring", int, 1, 600),
+    "max_segments": ("ring", int, 2, 100_000),
+    "released_grace_seconds": ("ring", float, 0.0, 86_400.0),
+    "min_free_mb": ("ring", int, 0, 1_000_000),
 }
+
+# Deliberately not editable, each for a concrete reason:
+#   [server] host/port  - a wrong binding would lock the UI out
+#   [paths]  data_dir   - the settings store itself lives under it
+#   [paths]  recordings_dir - moving it orphans existing recordings, whose
+#                             rows reconcile() would then drop
+#   [capture] command   - arbitrary argv from an unauthenticated UI is
+#                         remote code execution as the service user
 
 RESTART_SETTINGS = frozenset({"sample_rate", "channels", "bit_depth"})
 
 
-def restart_required(running: Config, target: Config) -> bool:
-    return any(getattr(running.audio, name) != getattr(target.audio, name)
+def restart_required(running: AudioConfig, target: AudioConfig) -> bool:
+    """True when the configured audio format differs from the running one."""
+    return any(getattr(running, name) != getattr(target, name)
                for name in RESTART_SETTINGS)
 
 
@@ -238,4 +258,6 @@ def validate_settings(patch: dict, config: Config) -> dict:
     merged = {**config.editable_values(), **clean}
     if merged["stop_threshold_dbfs"] > merged["start_threshold_dbfs"]:
         raise ValueError("stop_threshold_dbfs must not exceed start_threshold_dbfs")
+    if merged["restart_backoff_min_s"] > merged["restart_backoff_max_s"]:
+        raise ValueError("restart_backoff_min_s must not exceed restart_backoff_max_s")
     return clean

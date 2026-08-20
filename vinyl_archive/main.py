@@ -16,6 +16,7 @@ from .capture.manager import CaptureManager
 from .config import Config
 from .db import Database, reconcile
 from .sessions.exporter import Exporter
+from .sessions.streamer import SessionStreamer
 
 STATIC_DIR = Path(__file__).parent / "web" / "static"
 
@@ -26,19 +27,23 @@ async def _lifespan(app: FastAPI):
     config.ensure_dirs()
 
     db = Database(config.db_path)
-    reconcile(db, config.buffer_dir, config.recordings_dir)
 
     # Settings changed from the web UI live in the DB and win over the file.
+    # Resolved before reconcile: it needs the effective audio format to spot
+    # buffer segments left over from a format change.
     stored = db.get_settings()
     if stored:
         config = config.with_settings(stored)
         app.state.config = config
+        config.ensure_dirs()
+    reconcile(db, config.buffer_dir, config.recordings_dir, config.audio)
 
     manager = CaptureManager(config, db)
     manager.start()
 
     app.state.db = db
     app.state.manager = manager
+    app.state.streamer = SessionStreamer(config, db, manager)
     app.state.exporter = Exporter(config, db, manager)
     app.state.export_pool = ThreadPoolExecutor(max_workers=1,
                                                thread_name_prefix="export")

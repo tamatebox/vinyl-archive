@@ -17,26 +17,26 @@
     <span id="level-text" class="mono">-- dBFS</span>
     <span id="buffer-text" class="dim"></span>
     <span class="spacer"></span>
-    <button id="btn-start" hidden>Start capture</button>
-    <button id="btn-stop" hidden class="secondary">Stop capture</button>
+    <button id="btn-rec" class="rec">● Record</button>
+    <button id="btn-rec-stop" class="danger" hidden>■ Stop recording</button>
   </div>
 </header>
 
 <main>
   <section>
-    <h2>Detected sessions</h2>
-    <div id="sessions" class="list"></div>
-  </section>
-
-  <section>
-    <h2>Saved recordings</h2>
-    <div id="recordings" class="list"></div>
+    <h2>History</h2>
+    <p class="dim legend">Everything played is captured automatically and kept
+    here temporarily. <b>Keep</b> makes an entry permanent; anything left
+    buffered is eventually reclaimed to make room. Both can be played and
+    downloaded.</p>
+    <div id="history" class="list"></div>
   </section>
 
   <section>
     <details id="settings">
       <summary>Settings</summary>
       <form id="settings-form">
+        <h3>Detection</h3>
         <div class="fields">
           <label>Start threshold (dBFS)
             <input type="number" step="0.5" name="start_threshold_dbfs"></label>
@@ -52,17 +52,75 @@
             <input type="number" step="0.1" min="0" name="postroll_seconds"></label>
           <label>Min session (s)
             <input type="number" step="1" min="0" name="min_session_seconds"></label>
+          <label>Analysis block (ms)
+            <input type="number" step="10" min="10" max="1000" name="block_ms"></label>
           <label class="check">
             <input type="checkbox" name="silence_gating">
-            Silence gating (write to disk only during sessions)</label>
+            Silence gating (write to disk only while a session is open)</label>
         </div>
+
+        <h3>Input</h3>
+        <div class="fields">
+          <label>ALSA device
+            <input type="text" name="device" placeholder="hw:CARD=CODEC"></label>
+          <label>Sample rate (Hz)
+            <input type="number" step="1000" name="sample_rate"></label>
+          <label>Channels
+            <input type="number" step="1" min="1" max="8" name="channels"></label>
+          <label>Bit depth
+            <select name="bit_depth">
+              <option value="16">16-bit</option>
+              <option value="24">24-bit</option>
+            </select></label>
+        </div>
+        <p class="dim">The device is switched immediately. Sample rate,
+        channels and bit depth take effect after a service restart — the
+        buffer cannot mix formats, so its current contents are discarded then.
+        Saved recordings are never affected.</p>
+
+        <h3>Buffer</h3>
+        <div class="fields">
+          <label>Segment length (s)
+            <input type="number" step="5" min="1" max="600" name="segment_seconds"></label>
+          <label>Max segments
+            <input type="number" step="10" min="2" name="max_segments"></label>
+          <label>Released grace (s)
+            <input type="number" step="10" min="0" name="released_grace_seconds"></label>
+          <label>Min free disk (MB)
+            <input type="number" step="128" min="0" name="min_free_mb"></label>
+        </div>
+        <p class="dim">Segment length × max segments is how far back the
+        history reaches. Segments already on disk keep their own length, so
+        changes apply from the next rotation.</p>
+
+        <h3>Resilience</h3>
+        <div class="fields">
+          <label>Restart backoff min (s)
+            <input type="number" step="0.5" min="0.1" name="restart_backoff_min_s"></label>
+          <label>Restart backoff max (s)
+            <input type="number" step="0.5" min="0.1" name="restart_backoff_max_s"></label>
+          <label class="check">
+            <input type="checkbox" name="auto_start">
+            Start capturing on boot</label>
+        </div>
+
         <div class="form-actions">
           <button type="submit">Apply</button>
           <span id="settings-msg" class="dim"></span>
         </div>
-        <p class="dim">Applied immediately and persisted. Device, sample rate
-        and bit depth are set in config.toml (restart required).</p>
       </form>
+
+      <p class="dim">Not editable here: <code>[server]</code> host/port and
+      <code>[paths]</code> live in <code>config.toml</code> (a wrong binding
+      would lock this page out, and the settings store itself lives under
+      <code>data_dir</code>), and <code>[capture] command</code> stays
+      file-only because this UI has no authentication.</p>
+
+      <div id="capture-control">
+        <button id="btn-start" hidden class="secondary">Resume continuous capture</button>
+        <button id="btn-stop" hidden class="secondary">Pause continuous capture</button>
+        <span class="dim">Pausing stops the automatic backup entirely.</span>
+      </div>
     </details>
   </section>
 </main>

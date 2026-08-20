@@ -47,7 +47,8 @@ class CaptureRecorder:
                  audio: AudioConfig,
                  on_level: Callable[[float], None],
                  should_stop: Callable[[], bool],
-                 gate_frames: Callable[[], int | None] = lambda: None):
+                 gate_frames: Callable[[], int | None] = lambda: None,
+                 gate_state: Callable[[], tuple[bool, int]] | None = None):
         self._source = source
         self._writer = writer
         self._detector = detector
@@ -56,6 +57,10 @@ class CaptureRecorder:
         self._on_level = on_level
         self._should_stop = should_stop
         self._gate_frames = gate_frames  # callable; None result: write all
+        # Whether a session is open, and where it starts. Defaults to the
+        # detector; the manager overrides it so manual recordings gate too.
+        self._gate_state = gate_state or (
+            lambda: (detector.active, detector.session_start))
         self._pending: deque[tuple[int, np.ndarray]] = deque()
         self._pending_frames = 0
 
@@ -83,8 +88,9 @@ class CaptureRecorder:
 
     def _dispatch(self, block_start: int, frames: np.ndarray) -> None:
         gate = self._gate_frames()  # re-read: editable at runtime
-        if gate is None or self._detector.active:
-            self._flush_pending(self._detector.session_start)
+        active, session_start = self._gate_state()
+        if gate is None or active:
+            self._flush_pending(session_start)
             self._writer.append(frames)
             return
         self._pending.append((block_start, frames))

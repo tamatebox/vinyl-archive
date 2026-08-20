@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     end_utc TEXT,
     state TEXT NOT NULL DEFAULT 'active'
         CHECK (state IN ('active','ended','saving','saved','expired')),
-    truncated_head INTEGER NOT NULL DEFAULT 0
+    truncated_head INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT 'auto'
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -76,6 +77,10 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(SCHEMA)
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(sessions)")]
+            if "kind" not in cols:  # pre-'kind' database
+                self._conn.execute("ALTER TABLE sessions ADD COLUMN"
+                                   " kind TEXT NOT NULL DEFAULT 'auto'")
             self._conn.commit()
 
     def close(self) -> None:
@@ -140,10 +145,12 @@ class Database:
 
     # -- sessions ----------------------------------------------------------
 
-    def create_session(self, start_sample: int, start_utc: str) -> int:
+    def create_session(self, start_sample: int, start_utc: str,
+                       kind: str = "auto") -> int:
         cur = self._exec(
-            "INSERT INTO sessions (start_sample, start_utc, state) VALUES (?,?, 'active')",
-            (start_sample, start_utc),
+            "INSERT INTO sessions (start_sample, start_utc, state, kind)"
+            " VALUES (?,?, 'active', ?)",
+            (start_sample, start_utc, kind),
         )
         return cur.lastrowid
 
@@ -160,6 +167,9 @@ class Database:
     def set_session_state(self, session_id: int, state: str) -> None:
         self._exec("UPDATE sessions SET state = ? WHERE id = ?", (state, session_id))
 
+    def set_session_kind(self, session_id: int, kind: str) -> None:
+        self._exec("UPDATE sessions SET kind = ? WHERE id = ?", (kind, session_id))
+
     def mark_truncated_head(self, session_id: int, new_start_sample: int) -> None:
         self._exec(
             "UPDATE sessions SET truncated_head = 1, start_sample = ? WHERE id = ?",
@@ -174,6 +184,12 @@ class Database:
         return self._query(
             "SELECT * FROM sessions ORDER BY start_sample DESC LIMIT ?", (limit,)
         )
+
+    def session_meta(self) -> dict[int, dict]:
+        """id -> {kind, start_utc} for every session, for joining onto
+        recordings without one query per row."""
+        return {r["id"]: r for r in
+                self._query("SELECT id, kind, start_utc FROM sessions")}
 
     def unsaved_sessions(self) -> list[dict]:
         qs = ",".join("?" * len(UNSAVED_STATES))
@@ -223,18 +239,40 @@ class Database:
         self._exec("UPDATE recordings SET label = ? WHERE id = ?", (label, recording_id))
 
 
-def reconcile(db: Database, buffer_dir: Path, recordings_dir: Path) -> None:
-    """Bring the DB in line with reality after a restart. Files are the truth."""
+def reconcile(db: Database, buffer_dir: Path, recordings_dir: Path,
+              audio=None) -> None:
+    """Bring the DB in line with reality after a restart. Files are the truth.
+
+    When ``audio`` (an AudioConfig) is given, buffer segments recorded in a
+    different format are discarded: the audio format is only changeable with
+    a restart, and mixing formats inside the buffer would corrupt exports.
+    Saved recordings are standalone files and are never touched.
+    """
     import soundfile as sf
 
     on_disk = {p.name: p for p in buffer_dir.glob("seg_*.flac")}
 
+    def format_matches(path: Path) -> bool:
+        if audio is None:
+            return True
+        try:
+            info = sf.info(str(path))
+        except Exception:
+            return False
+        return (info.samplerate == audio.sample_rate
+                and info.channels == audio.channels
+                and info.subtype == audio.flac_subtype)
+
     for row in db.list_segments():
-        if row["filename"] not in on_disk:
+        path = on_disk.pop(row["filename"], None)
+        if path is None:
             log.info("reconcile: dropping DB row for missing segment %s", row["filename"])
             db.delete_segment(row["id"])
-        else:
-            on_disk.pop(row["filename"])
+        elif not format_matches(path):
+            log.warning("reconcile: discarding segment %s (audio format changed)",
+                        row["filename"])
+            path.unlink(missing_ok=True)
+            db.delete_segment(row["id"])
 
     for name, path in sorted(on_disk.items()):
         m = SEGMENT_NAME_RE.match(name)
@@ -245,6 +283,10 @@ def reconcile(db: Database, buffer_dir: Path, recordings_dir: Path) -> None:
             info = sf.info(str(path))
         except Exception:
             log.warning("reconcile: removing unreadable segment %s", name)
+            path.unlink(missing_ok=True)
+            continue
+        if not format_matches(path):
+            log.warning("reconcile: discarding segment %s (audio format changed)", name)
             path.unlink(missing_ok=True)
             continue
         wall = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)

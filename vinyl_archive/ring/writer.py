@@ -20,8 +20,9 @@ log = logging.getLogger(__name__)
 class SegmentWriter:
     """Writes interleaved integer frames into rotating FLAC segments.
 
-    All methods except ``flushed_end``, ``request_rotate`` and
-    ``mark_discontinuity`` must be called from the capture thread only.
+    All methods except ``flushed_end``, ``request_rotate``,
+    ``set_segment_frames`` and ``mark_discontinuity`` must be called from the
+    capture thread only.
     """
 
     def __init__(self, db: Database, buffer_dir: Path, sample_rate: int,
@@ -61,6 +62,15 @@ class SegmentWriter:
     def request_rotate(self) -> None:
         """Ask the capture thread to close the current segment early."""
         self._rotate_requested.set()
+
+    def set_segment_frames(self, segment_frames: int) -> None:
+        """Change the rotation length (safe from any thread).
+
+        Each segment records its own length in the DB, so segments written
+        before and after the change coexist without special handling; the
+        open segment keeps its original target.
+        """
+        self._segment_frames = max(1, segment_frames)
 
     def mark_discontinuity(self) -> None:
         """Flag the next segment as following a capture gap."""
