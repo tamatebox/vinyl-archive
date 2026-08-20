@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="vinyl-archive">
+  <title>vinyl-archive</title>
+  <!-- The mark without its background plate, for drawing on a surface that
+       already has one. No page references it today. -->
+  <circle cx="32" cy="32" r="23" fill="none" stroke="#d4a24e" stroke-width="8"/>
+  <circle cx="32" cy="32" r="4" fill="#d4a24e"/>
+</svg>

@@ -88,6 +88,8 @@ Then edit `/etc/vinyl-archive/config.toml`:
 
 The web UI has no authentication — run it on a trusted LAN only.
 
+On an iPhone, *Share → Add to Home Screen* installs it as **Vinyl**: its own icon, no browser chrome, opening straight on the history list.
+
 ### Updating a running Pi
 
 ```sh
@@ -188,6 +190,23 @@ VINYL_ARCHIVE_CONFIG=dev-config.toml .venv/bin/python -m vinyl_archive
 On a Linux box you can test the real ALSA path without an ADC using the
 loopback driver: `modprobe snd-aloop`, set `device = "hw:CARD=Loopback,1,0"`,
 and `aplay -D hw:CARD=Loopback,0,0 some.wav` to feed it.
+
+### Icons
+
+The favicon and the home-screen icon are SVG sources in
+`vinyl_archive/web/static/icons/`, rasterised by `tools/make_icons.sh`
+(needs librsvg and ImageMagick). Run it after editing an SVG and commit the
+PNGs and the `.ico` — the Pi never rasterises anything.
+
+`icon.svg` is the master: a thick gold band and a spindle dot, which is
+little enough to survive a 16 px downscale, so the same drawing serves the
+16 px favicon and the 180 px home-screen icon. Grooves were tried and
+dropped — they only turn to mush at tab size. `icon-maskable.svg` is the
+same mark inset into the safe zone Android crops to, and
+`icon-transparent.svg` is the mark without its background plate (unused by
+the page). Icon colours are the UI's `--bg` and `--accent`, matching
+`theme-color` and the manifest's `background_color`, so the Android splash
+screen shows no seam around the icon.
 
 ## API
 

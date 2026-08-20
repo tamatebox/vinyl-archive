@@ -4,6 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vinyl-archive</title>
+<meta name="theme-color" content="#16181d">
+<!-- Bookmarks and tabs. The .ico is at the site root because browsers ask for
+     /favicon.ico on their own, before they have parsed any of this. -->
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+<!-- "Add to Home Screen". iOS ignores the manifest's icons and name, so the
+     apple-* tags below carry them; Android reads the manifest. -->
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vinyl">
+<!-- "black", not "black-translucent": translucent puts the header under the
+     status bar and this layout has no safe-area padding to give it. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>

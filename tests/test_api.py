@@ -1,6 +1,8 @@
 """API tests with the full app lifespan (capture disabled via config)."""
 
 import io
+import json
+import re
 import time
 
 import numpy as np
@@ -54,6 +56,31 @@ def test_index_serves_ui(client):
     res = client.get("/")
     assert res.status_code == 200
     assert "vinyl-archive" in res.text
+
+
+def test_icons_and_manifest_are_served(client):
+    """Every icon the page or the manifest names must actually resolve.
+
+    Bookmarks and the iOS home screen are the only places these are ever
+    seen, so a renamed or unshipped file is invisible in normal use.
+    """
+    assert client.get("/favicon.ico").status_code == 200
+    assert client.get("/apple-touch-icon.png").status_code == 200
+
+    res = client.get("/manifest.webmanifest")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/manifest+json")
+    manifest = json.loads(res.text)
+    assert manifest["short_name"] == "Vinyl"
+    for icon in manifest["icons"]:
+        assert client.get(icon["src"]).status_code == 200, icon["src"]
+
+    html = client.get("/").text
+    hrefs = re.findall(r'<link rel="(?:icon|apple-touch-icon|manifest)"[^>]*'
+                       r'href="([^"]+)"', html)
+    assert len(hrefs) == 4
+    for href in hrefs:
+        assert client.get(href).status_code == 200, href
 
 
 def test_save_download_rename_delete_flow(client, config):

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="vinyl-archive">
+  <title>vinyl-archive</title>
+  <!-- One drawing for every size. A thick band and a spindle dot both survive
+       a 16 px downscale, so tabs, bookmarks and the home screen all render
+       this file; adding grooves was tried and only muddied the small sizes.
+       The background plate is opaque because iOS composites a transparent
+       home-screen icon onto black and masks the corners itself. -->
+  <rect width="64" height="64" fill="#16181d"/>
+  <circle cx="32" cy="32" r="23" fill="none" stroke="#d4a24e" stroke-width="8"/>
+  <circle cx="32" cy="32" r="4" fill="#d4a24e"/>
+</svg>

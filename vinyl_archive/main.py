@@ -19,6 +19,7 @@ from .sessions.exporter import Exporter
 from .sessions.streamer import SessionStreamer
 
 STATIC_DIR = Path(__file__).parent / "web" / "static"
+ICON_DIR = STATIC_DIR / "icons"
 
 
 @asynccontextmanager
@@ -68,6 +69,25 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
+
+    # Root-path icon requests: browsers ask for /favicon.ico on their own
+    # before parsing any markup, and iOS looks for /apple-touch-icon.png at
+    # the root for pages that carry no link tag. The manifest is served here
+    # rather than from /static because mimetypes has no .webmanifest entry, so
+    # StaticFiles would label it application/octet-stream.
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> FileResponse:
+        return FileResponse(ICON_DIR / "favicon.ico")
+
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    @app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+    def apple_touch_icon() -> FileResponse:
+        return FileResponse(ICON_DIR / "apple-touch-icon.png")
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest() -> FileResponse:
+        return FileResponse(STATIC_DIR / "manifest.webmanifest",
+                            media_type="application/manifest+json")
 
     return app
 
