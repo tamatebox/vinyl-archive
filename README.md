@@ -16,8 +16,9 @@ the line input is treated identically.
               ├─ 60 s FLAC segments → buffer/   (ring buffer, ~12 h)
               ├─ silence detector   → sessions  (SQLite)
               └─ level / status     → web UI
-keep: session range → sample-accurate concat/trim → recordings/*.flac
-play: session range → WAV on the fly (no disk writes, seekable)
+keep:     session range → sample-accurate concat/trim → recordings/*.flac
+play:     session range → WAV on the fly (no disk writes, seekable)
+download: session range → FLAC on the fly (no disk writes)
 ```
 
 Everything that plays through the input is captured and listed in the web
@@ -48,6 +49,11 @@ eventually reclaimed as the buffer fills.
   generated on the fly. Nothing is stored to preview something, and byte
   ranges map onto samples, so the player seeks freely even in a 20-minute
   side. Disk always holds FLAC; WAV exists only on the wire.
+- **Download** gives FLAC for every entry, kept or not: a buffered session is
+  encoded as the response is written, so downloading one is the same audio
+  keeping it would have stored, at half the bytes of the WAV stream and still
+  without touching the disk. Being compressed, the download is sequential —
+  no resume, and the browser cannot show a total size while it runs.
 - **Auto level** (on by default, in the *Playback* row above the list) gives
   every entry its own gain so records cut at different levels play back
   equally loud. Levels are measured while the audio is written — the RMS of
@@ -216,6 +222,7 @@ screen shows no seam around the icon.
 | `GET /api/history` | Sessions and kept recordings as one timeline, with playback `gain_db` |
 | `POST /api/record/start` / `stop` | Explicit recording (wins over detection) |
 | `GET /api/sessions/{id}/audio` | Stream a buffered session as WAV (Range OK) |
+| `GET /api/sessions/{id}/download` | Download a buffered session as FLAC (no Range) |
 | `POST /api/sessions/{id}/save` | Keep a session as FLAC (async, 202) |
 | `DELETE /api/sessions/{id}` | Drop a buffered session from the history |
 | `GET /api/sessions` | Detected sessions (newest first) |

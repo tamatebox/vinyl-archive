@@ -128,6 +128,33 @@ def stream_session(session_id: int, request: Request):
         status_code=status_code, media_type="audio/wav", headers=headers)
 
 
+@router.get("/sessions/{session_id}/download")
+def download_session(session_id: int, request: Request):
+    """Serve a buffered session as FLAC, encoded as the response is written.
+
+    The player uses the WAV route because it can seek there; a download wants
+    the archive format instead, so this one re-encodes on the fly rather than
+    shipping twice the bytes. Sequential only: a compressed stream has no
+    length to declare up front and no byte-to-sample arithmetic to serve a
+    Range with.
+    """
+    db = request.app.state.db
+    sess = db.get_session(session_id)
+    if sess is None:
+        raise HTTPException(404, "session not found")
+
+    streamer = request.app.state.streamer
+    start, end = streamer.resolve_range(sess)
+    if end <= start:
+        raise HTTPException(410, "no buffered audio remains for this session")
+
+    name = f"session_{session_id}_{sess['start_utc'].replace(':', '')}.flac"
+    return StreamingResponse(
+        streamer.iter_flac(start, end), media_type="audio/flac",
+        headers={"Cache-Control": "no-store",
+                 "Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @router.get("/history")
 def list_history(request: Request) -> list[dict]:
     """Sessions and saved recordings as one timeline.
@@ -156,6 +183,7 @@ def list_history(request: Request) -> list[dict]:
             "size_bytes": rec["size_bytes"],
             "gain_db": auto_gain_db(rec["short_peak"], rec["mean_sq"]),
             "audio_url": f"/api/recordings/{rec['id']}/download",
+            "download_url": f"/api/recordings/{rec['id']}/download",
         })
 
     for sess in db.unsaved_sessions():
@@ -179,6 +207,9 @@ def list_history(request: Request) -> list[dict]:
             "size_bytes": None,
             "gain_db": auto_gain_db(short_peak, mean_sq),
             "audio_url": f"/api/sessions/{sess['id']}/audio",
+            # Play from the seekable WAV stream, download the FLAC: an entry
+            # that is only buffered still lands in the archive as FLAC.
+            "download_url": f"/api/sessions/{sess['id']}/download",
         })
 
     items.sort(key=lambda i: i["start_utc"], reverse=True)

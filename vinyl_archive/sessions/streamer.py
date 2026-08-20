@@ -1,9 +1,18 @@
-"""Stream a session's sample range straight out of the ring buffer as WAV.
+"""Serve a session's sample range straight out of the ring buffer.
 
-Used for previewing and downloading sessions that have not been saved yet.
-WAV (rather than FLAC) because its size is known from the frame count alone,
-so the response can be generated incrementally with no temporary file — the
-buffer volume sees zero extra writes no matter how often you hit play.
+Used for previewing and downloading sessions that have not been saved yet,
+in two shapes, because playing and keeping want opposite things:
+
+* WAV for the player: its size is known from the frame count alone, so byte
+  offsets map onto samples arithmetically and the player can seek freely
+  without the session having been saved first.
+* FLAC for downloads: about half the bytes, and the file that lands in the
+  listener's archive is then the same thing "Keep" would have written. A
+  compressed stream has no byte-to-sample arithmetic, so this one is
+  sequential — no Range, no length known in advance.
+
+Neither writes anything to disk, so previewing and downloading cost the
+buffer volume nothing no matter how often you hit play.
 
 Ranges the buffer no longer covers are filled with silence so the stream
 always matches the declared length.
@@ -11,6 +20,7 @@ always matches the declared length.
 
 from __future__ import annotations
 
+import io
 import logging
 import struct
 from typing import Iterator
@@ -48,6 +58,83 @@ def pack_frames(frames: np.ndarray, sample_bytes: int) -> bytes:
     # int32 MSB-justified -> 3-byte little-endian samples.
     as32 = (frames.astype(np.int32) >> 8).astype("<i4")
     return as32.view(np.uint8).reshape(-1, 4)[:, :3].tobytes()
+
+
+# "fLaC" + the STREAMINFO block header + its 34-byte body. Everything
+# libsndfile revises after the fact lives inside it.
+FLAC_HEAD_BYTES = 42
+_TOTAL_SAMPLES_BITS = 36
+
+
+class _FlacSink:
+    """Collects libsndfile's FLAC output for handing out in chunks.
+
+    libsndfile writes the stream strictly forward and then, at close, seeks
+    back into STREAMINFO to stamp the frame count, the frame sizes and an
+    MD5 of the audio — bytes that a streaming response sent long ago. So the
+    header is held until the frame count (known here up front) is patched in
+    by hand, and the close-time rewrite of already-sent bytes is dropped:
+    unset frame sizes and an all-zero MD5 both read as "unknown" to a
+    decoder, while the duration, the one field a player actually needs, is
+    the one we can fill correctly ourselves.
+    """
+
+    def __init__(self, n_frames: int):
+        self._n_frames = n_frames
+        self._pending = bytearray()  # bytes [sent, sent + len(pending))
+        self._sent = 0
+        self._pos = 0
+
+    # -- file-like interface libsndfile drives ----------------------------
+    def write(self, data) -> int:
+        data = bytes(data)
+        written = len(data)
+        offset = self._pos - self._sent
+        self._pos += written
+        if offset < 0:  # revision of bytes already handed out: drop those
+            data = data[-offset:]
+            offset = 0
+        if data:
+            grow = offset + len(data) - len(self._pending)
+            if grow > 0:
+                self._pending.extend(bytes(grow))
+            self._pending[offset:offset + len(data)] = data
+        return written
+
+    def read(self, count: int = -1) -> bytes:
+        return b""
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_CUR:
+            self._pos += offset
+        elif whence == io.SEEK_END:
+            self._pos = self._sent + len(self._pending) + offset
+        else:
+            self._pos = offset
+        return self._pos
+
+    def tell(self) -> int:
+        return self._pos
+
+    # -- streaming side ---------------------------------------------------
+    def take(self) -> bytes:
+        """Hand out everything encoded so far, header first and once."""
+        if self._sent == 0:
+            if len(self._pending) < FLAC_HEAD_BYTES:
+                return b""  # header not complete yet; nothing is sendable
+            self._patch_total_samples()
+        out = bytes(self._pending)
+        self._sent += len(out)
+        self._pending.clear()
+        return out
+
+    def _patch_total_samples(self) -> None:
+        # Last 36 bits of the 8 bytes at offset 18: sample rate, channel and
+        # depth fields share the same word, so read-modify-write it.
+        word = int.from_bytes(self._pending[18:26], "big")
+        mask = (1 << _TOTAL_SAMPLES_BITS) - 1
+        word = (word & ~mask) | (self._n_frames & mask)
+        self._pending[18:26] = word.to_bytes(8, "big")
 
 
 class SessionStreamer:
@@ -122,15 +209,44 @@ class SessionStreamer:
                          audio.bit_depth)
         yield from self.iter_frames(start, end)
 
+    def iter_flac(self, start: int, end: int) -> Iterator[bytes]:
+        """Encode frames [start, end) to FLAC as the response is written.
+
+        Same encoder settings the exporter uses, so downloading a buffered
+        session and keeping it hand back the same samples — only the header
+        differs, since a stream cannot know its own MD5 in advance.
+        """
+        audio = self._audio
+        sink = _FlacSink(max(0, end - start))
+        out = sf.SoundFile(sink, "w", samplerate=audio.sample_rate,
+                           channels=audio.channels, subtype=audio.flac_subtype,
+                           format="FLAC")
+        try:
+            for block in self.iter_blocks(start, end):
+                out.write(block)
+                chunk = sink.take()
+                if chunk:
+                    yield chunk
+        finally:
+            out.close()  # also runs when the client hangs up mid-download
+        tail = sink.take()
+        if tail:
+            yield tail
+
     def iter_frames(self, start: int, end: int) -> Iterator[bytes]:
+        for block in self.iter_blocks(start, end):
+            yield pack_frames(block, self._audio.sample_bytes)
+
+    def iter_blocks(self, start: int, end: int) -> Iterator[np.ndarray]:
+        """Yield frames [start, end) as interleaved integer arrays."""
         audio = self._audio
         silence = np.zeros((CHUNK_FRAMES, audio.channels),
                            dtype=audio.frame_dtype)
 
-        def fill(n: int) -> Iterator[bytes]:
+        def fill(n: int) -> Iterator[np.ndarray]:
             while n > 0:
                 take = min(n, CHUNK_FRAMES)
-                yield pack_frames(silence[:take], audio.sample_bytes)
+                yield silence[:take]
                 n -= take
 
         pos = start
@@ -152,7 +268,7 @@ class SessionStreamer:
                                          dtype=audio.frame_dtype, always_2d=True)
                         if len(chunk) == 0:
                             break
-                        yield pack_frames(chunk, audio.sample_bytes)
+                        yield chunk
                         pos += len(chunk)
                         remaining -= len(chunk)
             except (OSError, sf.LibsndfileError):

@@ -193,6 +193,63 @@ def test_session_audio_supports_range_requests(client, config):
                       headers={"Range": f"bytes={len(full)}-"}).status_code == 416
 
 
+def test_session_download_is_flac_and_writes_nothing(client, config):
+    """A buffered session downloads as FLAC, so an entry that was never kept
+    on the Pi still lands in the archive in the archive format."""
+    sid = seed_session(client.app, config)
+
+    res = client.get(f"/api/sessions/{sid}/download")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "audio/flac"
+    assert ".flac" in res.headers["content-disposition"]
+    assert res.content[:4] == b"fLaC"
+    assert not list(config.recordings_dir.iterdir())
+    assert not list(config.buffer_dir.glob("*.part"))
+
+    frames = 2 * RATE - 1000
+    info = sf.info(io.BytesIO(res.content))
+    # The frame count is stamped into the header up front, so a player knows
+    # the duration and can seek in the downloaded file.
+    assert info.frames == frames
+    assert info.samplerate == RATE and info.channels == 2
+    out, _rate = sf.read(io.BytesIO(res.content), dtype="int16", always_2d=True)
+    assert out.shape == (frames, 2) and np.all(out == 1000)
+    # Half the bytes of the WAV the player streams.
+    assert len(res.content) < 44 + frames * 4
+
+
+def test_session_download_matches_what_keeping_would_store(client, config):
+    """Download-now and keep-then-download are the same audio: one encode
+    path, so a listener never has to pick between them for quality."""
+    sid = seed_session(client.app, config)
+    streamed, _rate = sf.read(
+        io.BytesIO(client.get(f"/api/sessions/{sid}/download").content),
+        dtype="int16", always_2d=True)
+
+    client.post(f"/api/sessions/{sid}/save")
+    saved = wait_for(lambda: [i for i in client.get("/api/history").json()
+                              if i["status"] == "saved"])[0]
+    kept, _rate = sf.read(io.BytesIO(client.get(saved["download_url"]).content),
+                          dtype="int16", always_2d=True)
+    assert np.array_equal(streamed, kept)
+
+
+def test_history_downloads_are_always_flac(client, config):
+    sid = seed_session(client.app, config)
+    item = client.get("/api/history").json()[0]
+    # Playing seeks through the WAV stream; downloading takes the FLAC.
+    assert item["audio_url"] == f"/api/sessions/{sid}/audio"
+    assert item["download_url"] == f"/api/sessions/{sid}/download"
+
+
+def test_download_session_without_buffered_audio_410(client):
+    db = client.app.state.db
+    sid = db.create_session(0, utcnow_iso())
+    db.close_session(sid, 0, utcnow_iso())
+    assert client.get(f"/api/sessions/{sid}/download").status_code == 410
+    assert client.get("/api/sessions/999/download").status_code == 404
+
+
 def test_dismiss_buffered_session(client, config):
     sid = seed_session(client.app, config)
     assert client.delete(f"/api/sessions/{sid}").status_code == 204

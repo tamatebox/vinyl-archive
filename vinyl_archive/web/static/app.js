@@ -214,12 +214,13 @@ function button(label, cls, onClick) {
 function downloadLink(item) {
   const a = document.createElement("a");
   a.className = "dl";
-  a.href = item.audio_url;
+  a.href = item.download_url;
   a.download = "";
-  a.textContent = item.permanent ? "Download FLAC" : "Download WAV";
+  a.textContent = "Download FLAC";
   a.title = item.permanent
     ? "The stored lossless file."
-    : "Streamed from the buffer as WAV. Keep it to get a FLAC file.";
+    : "Encoded out of the buffer on the fly. Same audio Keep would store, "
+      + "without keeping it on the Pi.";
   return a;
 }
 
