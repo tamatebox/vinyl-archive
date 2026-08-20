@@ -325,3 +325,53 @@ def test_config_fields_are_classified():
     unclassified = names - set(EDITABLE_SETTINGS) - file_only
     assert not unclassified, f"classify these in EDITABLE_SETTINGS or file_only: {unclassified}"
     assert file_only.isdisjoint(EDITABLE_SETTINGS)
+
+
+def test_settings_form_matches_editable_bounds():
+    """The settings form must be able to submit anything the API accepts.
+
+    A number input's ``step`` is a *validation* constraint anchored at ``min``
+    (valid values are min + k*step), so a coarse step silently forbids legal
+    values — ``step="5" min="1"`` made the default 60 s segment length
+    unreachable, the browser offering 56 or 61 instead. Hence: step mirrors
+    the type only, and min/max mirror the server's bounds exactly, so neither
+    a default nor a file-set value can be rejected before it is even sent.
+    """
+    from html.parser import HTMLParser
+
+    from vinyl_archive.config import EDITABLE_SETTINGS
+    from vinyl_archive.main import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text()
+    form = html[html.index('<form id="settings-form"'):html.index("</form>")]
+
+    class Inputs(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.controls = {}
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("input", "select"):
+                a = dict(attrs)
+                if "name" in a:
+                    self.controls[a["name"]] = a
+
+    p = Inputs()
+    p.feed(form)
+    controls = p.controls
+
+    assert set(controls) == set(EDITABLE_SETTINGS), "form and API disagree"
+
+    for name, attrs in controls.items():
+        _, typ, lo, hi = EDITABLE_SETTINGS[name]
+        if attrs.get("type") != "number":
+            continue
+        want_step = "1" if typ is int else "any"
+        assert attrs.get("step") == want_step, f"{name}: step must be {want_step}"
+        for attr, bound in (("min", lo), ("max", hi)):
+            if bound is None:
+                assert attr not in attrs, f"{name}: {attr} bounds nothing"
+            else:
+                assert attr in attrs, f"{name}: missing {attr}"
+                assert float(attrs[attr]) == float(bound), (
+                    f"{name}: {attr}={attrs[attr]} disagrees with the API's {bound}")

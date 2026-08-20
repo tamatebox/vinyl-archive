@@ -57,21 +57,21 @@ passages can clip on output.">
         <h3>Detection</h3>
         <div class="fields">
           <label>Start threshold (dBFS)
-            <input type="number" step="0.5" name="start_threshold_dbfs"></label>
+            <input type="number" step="any" min="-120" max="0" name="start_threshold_dbfs"></label>
           <label>Stop threshold (dBFS)
-            <input type="number" step="0.5" name="stop_threshold_dbfs"></label>
+            <input type="number" step="any" min="-120" max="0" name="stop_threshold_dbfs"></label>
           <label>Start hold (s)
-            <input type="number" step="0.1" min="0" name="start_hold_seconds"></label>
+            <input type="number" step="any" min="0" max="10" name="start_hold_seconds"></label>
           <label>End silence (s)
-            <input type="number" step="1" min="1" name="end_silence_seconds"></label>
+            <input type="number" step="any" min="1" max="600" name="end_silence_seconds"></label>
           <label>Pre-roll (s)
-            <input type="number" step="0.1" min="0" name="preroll_seconds"></label>
+            <input type="number" step="any" min="0" max="30" name="preroll_seconds"></label>
           <label>Post-roll (s)
-            <input type="number" step="0.1" min="0" name="postroll_seconds"></label>
+            <input type="number" step="any" min="0" max="60" name="postroll_seconds"></label>
           <label>Min session (s)
-            <input type="number" step="1" min="0" name="min_session_seconds"></label>
+            <input type="number" step="any" min="0" max="3600" name="min_session_seconds"></label>
           <label>Analysis block (ms)
-            <input type="number" step="10" min="10" max="1000" name="block_ms"></label>
+            <input type="number" step="1" min="10" max="1000" name="block_ms"></label>
           <label class="check">
             <input type="checkbox" name="silence_gating">
             Silence gating (write to disk only while a session is open)</label>
@@ -82,7 +82,7 @@ passages can clip on output.">
           <label>ALSA device
             <input type="text" name="device" placeholder="hw:CARD=CODEC"></label>
           <label>Sample rate (Hz)
-            <input type="number" step="1000" name="sample_rate"></label>
+            <input type="number" step="1" min="8000" max="192000" name="sample_rate"></label>
           <label>Channels
             <input type="number" step="1" min="1" max="8" name="channels"></label>
           <label>Bit depth
@@ -99,13 +99,13 @@ passages can clip on output.">
         <h3>Buffer</h3>
         <div class="fields">
           <label>Segment length (s)
-            <input type="number" step="5" min="1" max="600" name="segment_seconds"></label>
+            <input type="number" step="1" min="1" max="600" name="segment_seconds"></label>
           <label>Max segments
-            <input type="number" step="10" min="2" name="max_segments"></label>
+            <input type="number" step="1" min="2" max="100000" name="max_segments"></label>
           <label>Released grace (s)
-            <input type="number" step="10" min="0" name="released_grace_seconds"></label>
+            <input type="number" step="any" min="0" max="86400" name="released_grace_seconds"></label>
           <label>Min free disk (MB)
-            <input type="number" step="128" min="0" name="min_free_mb"></label>
+            <input type="number" step="1" min="0" max="1000000" name="min_free_mb"></label>
         </div>
         <p class="dim">Segment length × max segments is how far back the
         history reaches. Segments already on disk keep their own length, so
@@ -114,9 +114,9 @@ passages can clip on output.">
         <h3>Resilience</h3>
         <div class="fields">
           <label>Restart backoff min (s)
-            <input type="number" step="0.5" min="0.1" name="restart_backoff_min_s"></label>
+            <input type="number" step="any" min="0.1" max="60" name="restart_backoff_min_s"></label>
           <label>Restart backoff max (s)
-            <input type="number" step="0.5" min="0.1" name="restart_backoff_max_s"></label>
+            <input type="number" step="any" min="0.1" max="600" name="restart_backoff_max_s"></label>
           <label class="check">
             <input type="checkbox" name="auto_start">
             Start capturing on boot</label>
