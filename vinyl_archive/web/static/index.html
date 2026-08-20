@@ -17,6 +17,14 @@
     <span id="level-text" class="mono">-- dBFS</span>
     <span id="buffer-text" class="dim"></span>
     <span class="spacer"></span>
+    <label id="gain-control" title="Playback boost. Applied on the way to the
+speakers only — the stored audio is never modified. Line-in from a phono stage
+sits well below full scale, so a few dB here just matches it to other players.
+Above 0 dB, already-loud passages can clip on output.">
+      <span class="dim">Boost</span>
+      <input id="gain" type="range" min="0" max="24" step="1" value="0">
+      <span id="gain-text" class="mono">0 dB</span>
+    </label>
     <button id="btn-rec" class="rec">● Record</button>
     <button id="btn-rec-stop" class="danger" hidden>■ Stop recording</button>
   </div>
@@ -26,9 +34,9 @@
   <section>
     <h2>History</h2>
     <p class="dim legend">Everything played is captured automatically and kept
-    here temporarily. <b>Keep</b> makes an entry permanent; anything left
-    buffered is eventually reclaimed to make room. Both can be played and
-    downloaded.</p>
+    here temporarily. <b>Keep</b> makes an entry permanent in one click —
+    name it afterwards with <b>Rename</b>; anything left buffered is
+    eventually reclaimed to make room. Both can be played and downloaded.</p>
     <div id="history" class="list"></div>
   </section>
 

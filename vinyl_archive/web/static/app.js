@@ -87,6 +87,62 @@ function renderStatus(st) {
   $("btn-stop").hidden = !capturing;
 }
 
+// -- playback gain ------------------------------------------------------------
+// Output-side only: the player still fetches the untouched WAV/FLAC bytes, so
+// boosting here can never affect what gets archived. Line-in from a phono
+// stage peaks well below full scale, which is why playback sounds quiet next
+// to loudness-normalised sources.
+
+const GAIN_KEY = "playbackGainDb";
+
+let audioCtx = null;
+let gainNode = null;
+const routed = new WeakSet();  // elements already wired into the graph
+let webAudioBroken = false;
+
+function applyGain() {
+  const db = Number($("gain").value) || 0;
+  $("gain-text").textContent = `${db > 0 ? "+" : ""}${db} dB`;
+  try { localStorage.setItem(GAIN_KEY, String(db)); } catch {}
+  if (gainNode) gainNode.gain.value = 10 ** (db / 20);
+}
+
+// Built on first play, not up front: a context created without a user gesture
+// starts suspended, and an element routed through a suspended context is mute.
+// createMediaElementSource is one-shot per element and cannot be undone, so
+// every player goes through the gain node even at 0 dB.
+function routePlayer(el) {
+  if (webAudioBroken || routed.has(el)) return;
+  try {
+    if (!audioCtx) {
+      audioCtx = new AudioContext();
+      gainNode = audioCtx.createGain();
+      gainNode.connect(audioCtx.destination);
+      applyGain();
+    }
+    audioCtx.createMediaElementSource(el).connect(gainNode);
+    routed.add(el);
+  } catch (e) {
+    // No Web Audio: leave the element on its native output rather than
+    // risking silence. Playback keeps working, the slider does nothing.
+    webAudioBroken = true;
+    $("gain-control").hidden = true;
+  }
+}
+
+function onPlay(ev) {
+  routePlayer(ev.target);
+  if (audioCtx) audioCtx.resume().catch(() => {});
+}
+
+$("gain").oninput = applyGain;
+
+try {
+  const saved = Number(localStorage.getItem(GAIN_KEY));
+  if (Number.isFinite(saved) && saved > 0) $("gain").value = String(saved);
+} catch {}
+applyGain();
+
 // -- history ------------------------------------------------------------------
 
 const rows = new Map();  // key -> {el, parts, status}
@@ -114,6 +170,7 @@ function createRow(item) {
     player: el.querySelector(".player"),
   };
   parts.player.src = item.audio_url;
+  parts.player.addEventListener("play", onPlay);
   return { el, parts, status: null };
 }
 
@@ -151,15 +208,10 @@ function renderActions(row, item) {
   box.innerHTML = "";
   if (item.status === "buffered") {
     box.append(
-      button("Keep", null, () => {
-        const label = prompt("Name for this recording (optional):", "");
-        if (label === null) throw new Error("cancelled");
-        return api(`/api/sessions/${item.id}/save`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ label }),
-        });
-      }),
+      // Keep is one click: naming is a separate Rename action on the kept
+      // entry, so nothing stands between "I want this" and it being safe.
+      button("Keep", null, () =>
+        api(`/api/sessions/${item.id}/save`, { method: "POST" })),
       downloadLink(item),
       button("Dismiss", "secondary", () =>
         api(`/api/sessions/${item.id}`, { method: "DELETE" })),

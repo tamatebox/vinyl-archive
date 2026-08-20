@@ -67,6 +67,18 @@ h2 { font-size: 0.95rem; margin: 1.5rem 0 0.5rem; color: var(--dim);
   transition: width 0.3s linear;
 }
 
+#gain-control {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+#gain-control input[type="range"] {
+  width: 90px;
+  accent-color: var(--accent);
+}
+#gain-text { min-width: 4.5em; text-align: right; }
+
 .mono { font-family: ui-monospace, monospace; font-size: 0.85rem; min-width: 6.5em; }
 .dim { color: var(--dim); font-size: 0.85rem; }
 

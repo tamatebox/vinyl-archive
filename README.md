@@ -26,8 +26,9 @@ the safety net for the times you forget to press record. Press **Record** to
 mark a take explicitly; that takes precedence over detection and is also the
 only way to capture something quieter than the detector's threshold. Every
 entry, explicit or automatic, can be played and downloaded straight away.
-Entries you **Keep** become permanent FLAC files; the rest are eventually
-reclaimed as the buffer fills.
+Entries you **Keep** become permanent FLAC files — one click, no dialog, and
+**Rename** gives them a name whenever you get around to it; the rest are
+eventually reclaimed as the buffer fills.
 
 - **Continuous capture** starts at boot (systemd) and survives USB device
   unplug/replug and process crashes; the supervisor restarts `arecord`
@@ -47,6 +48,14 @@ reclaimed as the buffer fills.
   generated on the fly. Nothing is stored to preview something, and byte
   ranges map onto samples, so the player seeks freely even in a 20-minute
   side. Disk always holds FLAC; WAV exists only on the wire.
+- **Playback boost** (the *Boost* slider in the header, 0 to +24 dB) is a
+  Web Audio gain node in front of the browser's output, applied to every
+  player on the page and remembered across visits. Line-in from a phono
+  stage peaks well below full scale, so archives sound quiet next to
+  loudness-normalised sources; this matches them up without touching a byte
+  of the stored audio. It is not a fix for a genuinely weak input — check
+  the level meter while a record plays and raise the ALSA capture gain
+  (`amixer -c <card> sset Capture 80%`) if the RMS sits below −45 dBFS.
 - **Keeping** extracts the exact sample range from the buffer segments into
   `recordings/` without pausing capture. Kept files are never deleted
   automatically; buffer segments fully covered by one are removed early to
