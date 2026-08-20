@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..config import restart_required, validate_settings
+from ..sessions.loudness import auto_gain_db
 
 log = logging.getLogger(__name__)
 
@@ -153,11 +154,16 @@ def list_history(request: Request) -> list[dict]:
             "permanent": True,
             "has_gaps": bool(rec["has_gaps"]),
             "size_bytes": rec["size_bytes"],
+            "gain_db": auto_gain_db(rec["short_peak"], rec["mean_sq"]),
             "audio_url": f"/api/recordings/{rec['id']}/download",
         })
 
     for sess in db.unsaved_sessions():
         end = sess["end_sample"]
+        # An active session has no end yet: level it on what is flushed so far.
+        short_peak, mean_sq = db.level_in_range(
+            sess["start_sample"],
+            end if end is not None else db.max_end_sample())
         items.append({
             "type": "session",
             "id": sess["id"],
@@ -171,6 +177,7 @@ def list_history(request: Request) -> list[dict]:
             "permanent": False,
             "has_gaps": bool(sess["truncated_head"]),
             "size_bytes": None,
+            "gain_db": auto_gain_db(short_peak, mean_sq),
             "audio_url": f"/api/sessions/{sess['id']}/audio",
         })
 

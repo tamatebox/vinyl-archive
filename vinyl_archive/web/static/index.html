@@ -17,14 +17,6 @@
     <span id="level-text" class="mono">-- dBFS</span>
     <span id="buffer-text" class="dim"></span>
     <span class="spacer"></span>
-    <label id="gain-control" title="Playback boost. Applied on the way to the
-speakers only — the stored audio is never modified. Line-in from a phono stage
-sits well below full scale, so a few dB here just matches it to other players.
-Above 0 dB, already-loud passages can clip on output.">
-      <span class="dim">Boost</span>
-      <input id="gain" type="range" min="0" max="24" step="1" value="0">
-      <span id="gain-text" class="mono">0 dB</span>
-    </label>
     <button id="btn-rec" class="rec">● Record</button>
     <button id="btn-rec-stop" class="danger" hidden>■ Stop recording</button>
   </div>
@@ -37,6 +29,24 @@ Above 0 dB, already-loud passages can clip on output.">
     here temporarily. <b>Keep</b> makes an entry permanent in one click —
     name it afterwards with <b>Rename</b>; anything left buffered is
     eventually reclaimed to make room. Both can be played and downloaded.</p>
+    <div id="playback-bar">
+      <span class="dim">Playback</span>
+      <label class="check" title="Levels each entry on the way to the speakers
+so records cut at different levels play back equally loud. Measured while the
+audio was captured: the RMS is aimed at -18 dBFS, backing off if that would
+push the loudest sample past -1 dBFS. The stored file is never modified — a
+download is always the untouched transfer.">
+        <input type="checkbox" id="auto-level" checked>
+        Auto level
+      </label>
+      <label id="gain-control" title="Manual offset on top of auto level, for
+when a transfer still sits wrong. Above 0 dB with auto level off, already-loud
+passages can clip on output.">
+        <span class="dim">Trim</span>
+        <input id="gain" type="range" min="-12" max="24" step="1" value="0">
+        <span id="gain-text" class="mono">0 dB</span>
+      </label>
+    </div>
     <div id="history" class="list"></div>
   </section>
 

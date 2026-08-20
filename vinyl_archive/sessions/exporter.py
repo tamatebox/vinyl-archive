@@ -16,6 +16,7 @@ import soundfile as sf
 
 from ..config import Config
 from ..db import Database
+from .loudness import LevelMeter, window_frames
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class Exporter:
             out_path = self._config.recordings_dir / filename
             part_path = out_path.with_suffix(".flac.part")
 
-            frames_written, has_gaps = self._copy_range(
+            frames_written, has_gaps, short_peak, mean_sq = self._copy_range(
                 segments, start, end, part_path)
             if frames_written == 0:
                 raise ExportError("no audio frames could be extracted")
@@ -76,6 +77,8 @@ class Exporter:
                 size_bytes=out_path.stat().st_size,
                 has_gaps=has_gaps or bool(sess["truncated_head"]),
                 label=label,
+                short_peak=short_peak,
+                mean_sq=mean_sq,
             )
             self._db.set_session_state(session_id, "saved")
             self._release_covered_segments(start, end)
@@ -89,10 +92,13 @@ class Exporter:
             raise
 
     def _copy_range(self, segments: list[dict], start: int, end: int,
-                    part_path: Path) -> tuple[int, bool]:
+                    part_path: Path) -> tuple[int, bool, float | None, float | None]:
         audio = self._config.audio
         frames_written = 0
         has_gaps = False
+        # Measured over exactly the range that lands in the file, so a keeper's
+        # playback gain does not inherit the segment-edge slop of a session's.
+        level = LevelMeter(window_frames(audio.sample_rate))
         expected = max(start, segments[0]["start_sample"])
         if expected > start:
             has_gaps = True  # head already evicted from the buffer
@@ -120,6 +126,7 @@ class Exporter:
                             if len(chunk) == 0:
                                 break
                             out.write(chunk)
+                            level.add(chunk)
                             frames_written += len(chunk)
                             remaining -= len(chunk)
                         if remaining > 0:
@@ -131,7 +138,8 @@ class Exporter:
                 expected = hi
         if expected < end:
             has_gaps = True  # tail was not flushed / already gone
-        return frames_written, has_gaps
+        short_peak, mean_sq = level.levels()
+        return frames_written, has_gaps, short_peak, mean_sq
 
     def _make_filename(self, sess: dict) -> str:
         ts = datetime.strptime(sess["start_utc"], "%Y-%m-%dT%H:%M:%SZ") \

@@ -48,6 +48,21 @@ def test_export_extracts_exact_range(config, db):
     assert db.get_session(sid)["state"] == "saved"
 
 
+def test_export_measures_the_range_it_wrote(config, db):
+    """A keeper's playback gain comes from its own audio, not from the
+    segments it happened to be carved out of."""
+    build_buffer(config, db)
+    sid = make_session(db, 5000, 21000)
+
+    rec = Exporter(config, db).export(sid)
+
+    out, _rate = sf.read(config.recordings_dir / rec["filename"],
+                         dtype="int16", always_2d=True)
+    x = out.astype(np.float64) / 32768.0
+    assert rec["mean_sq"] == pytest.approx(float((x * x).mean()), rel=1e-6)
+    assert 0.0 < rec["short_peak"] <= 1.0
+
+
 def test_export_releases_fully_covered_segments(config, db):
     build_buffer(config, db)
     sid = make_session(db, 5000, 21000)

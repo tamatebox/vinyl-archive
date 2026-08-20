@@ -1,9 +1,11 @@
 """API tests with the full app lifespan (capture disabled via config)."""
 
+import io
 import time
 
 import numpy as np
 import pytest
+import soundfile as sf
 from fastapi.testclient import TestClient
 
 from vinyl_archive.db import utcnow_iso
@@ -103,6 +105,25 @@ def test_history_merges_sessions_and_recordings(client, config):
     assert items[0]["label"] == "Side A"
     assert items[0]["permanent"] is True
     assert items[0]["start_utc"] == client.get("/api/sessions").json()[0]["start_utc"]
+
+
+def test_history_carries_the_playback_gain(client, config):
+    """Every entry arrives with the gain that levels it, so playback needs no
+    slider — and keeping it does not change either the gain or the bytes."""
+    sid = seed_session(client.app, config)  # constant 1000 -> -30.3 dBFS
+
+    buffered = client.get("/api/history").json()[0]
+    assert buffered["gain_db"] == pytest.approx(12.3, abs=0.3)
+
+    client.post(f"/api/sessions/{sid}/save")
+    saved = wait_for(lambda: [i for i in client.get("/api/history").json()
+                              if i["status"] == "saved"])[0]
+    assert saved["gain_db"] == pytest.approx(buffered["gain_db"], abs=0.3)
+
+    # The gain is playback-side only: the kept file is the raw transfer.
+    res = client.get(saved["audio_url"])
+    out, _rate = sf.read(io.BytesIO(res.content), dtype="int16", always_2d=True)
+    assert np.all(out == 1000)
 
 
 def test_session_audio_streams_wav_without_saving(client, config):

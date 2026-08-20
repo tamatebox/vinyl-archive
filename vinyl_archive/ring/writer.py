@@ -13,6 +13,7 @@ import numpy as np
 import soundfile as sf
 
 from ..db import Database, utcnow_iso
+from ..sessions.loudness import LevelMeter, window_frames
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ class SegmentWriter:
         self._seg_start = 0
         self._seg_wall = ""
         self._seg_disc = False
+        self._level_window = window_frames(sample_rate)
+        self._seg_level = LevelMeter(self._level_window)
 
     @property
     def position(self) -> int:
@@ -97,7 +100,11 @@ class SegmentWriter:
                 self._open()
             space = self._seg_start + self._segment_frames - self._pos
             take = min(space, len(frames) - offset)
-            self._sf.write(frames[offset:offset + take])
+            chunk = frames[offset:offset + take]
+            self._sf.write(chunk)
+            # Measured here, where the audio is already in RAM: reading it
+            # back later to work out a playback gain would cost a full decode.
+            self._seg_level.add(chunk)
             self._pos += take
             offset += take
             if self._pos >= self._seg_start + self._segment_frames:
@@ -117,6 +124,7 @@ class SegmentWriter:
         self._seg_wall = utcnow_iso()
         self._seg_disc = self._pending_discontinuity
         self._pending_discontinuity = False
+        self._seg_level = LevelMeter(self._level_window)
         self._sf = sf.SoundFile(str(self._seg_path), "w", samplerate=self._rate,
                                 channels=self._channels, subtype=self._subtype,
                                 format="FLAC")
@@ -131,8 +139,9 @@ class SegmentWriter:
         if n_frames <= 0:
             self._seg_path.unlink(missing_ok=True)
             return
+        short_peak, mean_sq = self._seg_level.levels()
         self._db.add_segment(self._seg_path.name, self._seg_start, n_frames,
-                             self._seg_wall, self._seg_disc)
+                             self._seg_wall, self._seg_disc, short_peak, mean_sq)
         with self._flush_lock:
             self._flushed_end = self._pos
         log.debug("segment closed: %s (%d frames)", self._seg_path.name, n_frames)

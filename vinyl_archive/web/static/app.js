@@ -87,46 +87,64 @@ function renderStatus(st) {
   $("btn-stop").hidden = !capturing;
 }
 
-// -- playback gain ------------------------------------------------------------
+// -- playback level ----------------------------------------------------------
 // Output-side only: the player still fetches the untouched WAV/FLAC bytes, so
-// boosting here can never affect what gets archived. Line-in from a phono
-// stage peaks well below full scale, which is why playback sounds quiet next
-// to loudness-normalised sources.
+// nothing here can affect what gets archived. Line-in from a phono stage peaks
+// well below full scale, which is why playback sounds quiet next to
+// loudness-normalised sources — and why every entry arrives with the gain that
+// fixes it (gain_db, from levels measured while it was captured). That gain is
+// per entry, so each player gets its own gain node; the trim slider is a
+// manual offset on top of all of them.
 
-const GAIN_KEY = "playbackGainDb";
+// The trim key is renamed on purpose: a boost saved back when it was the only
+// control would now stack on top of auto level and double the correction.
+const GAIN_KEY = "playbackTrimDb";
+const AUTO_KEY = "playbackAutoLevel";
 
 let audioCtx = null;
-let gainNode = null;
-const routed = new WeakSet();  // elements already wired into the graph
 let webAudioBroken = false;
+const gains = new Map();  // player element -> its GainNode
+
+const trimDb = () => Number($("gain").value) || 0;
+
+function playerGainDb(el) {
+  const auto = $("auto-level").checked ? Number(el.dataset.gainDb) || 0 : 0;
+  return auto + trimDb();
+}
+
+function applyPlayerGain(el) {
+  const node = gains.get(el);
+  if (node) node.gain.value = 10 ** (playerGainDb(el) / 20);
+}
 
 function applyGain() {
-  const db = Number($("gain").value) || 0;
+  const db = trimDb();
   $("gain-text").textContent = `${db > 0 ? "+" : ""}${db} dB`;
-  try { localStorage.setItem(GAIN_KEY, String(db)); } catch {}
-  if (gainNode) gainNode.gain.value = 10 ** (db / 20);
+  try {
+    localStorage.setItem(GAIN_KEY, String(db));
+    localStorage.setItem(AUTO_KEY, $("auto-level").checked ? "1" : "0");
+  } catch {}
+  for (const el of gains.keys()) applyPlayerGain(el);
 }
 
 // Built on first play, not up front: a context created without a user gesture
 // starts suspended, and an element routed through a suspended context is mute.
 // createMediaElementSource is one-shot per element and cannot be undone, so
-// every player goes through the gain node even at 0 dB.
+// every player goes through its own gain node even at 0 dB.
 function routePlayer(el) {
-  if (webAudioBroken || routed.has(el)) return;
+  if (webAudioBroken || gains.has(el)) return;
   try {
-    if (!audioCtx) {
-      audioCtx = new AudioContext();
-      gainNode = audioCtx.createGain();
-      gainNode.connect(audioCtx.destination);
-      applyGain();
-    }
-    audioCtx.createMediaElementSource(el).connect(gainNode);
-    routed.add(el);
+    if (!audioCtx) audioCtx = new AudioContext();
+    const node = audioCtx.createGain();
+    node.connect(audioCtx.destination);
+    audioCtx.createMediaElementSource(el).connect(node);
+    gains.set(el, node);
+    applyPlayerGain(el);
   } catch (e) {
     // No Web Audio: leave the element on its native output rather than
-    // risking silence. Playback keeps working, the slider does nothing.
+    // risking silence. Playback keeps working, the controls do nothing.
     webAudioBroken = true;
-    $("gain-control").hidden = true;
+    $("playback-bar").hidden = true;
   }
 }
 
@@ -136,10 +154,12 @@ function onPlay(ev) {
 }
 
 $("gain").oninput = applyGain;
+$("auto-level").onchange = applyGain;
 
 try {
-  const saved = Number(localStorage.getItem(GAIN_KEY));
-  if (Number.isFinite(saved) && saved > 0) $("gain").value = String(saved);
+  const saved = localStorage.getItem(GAIN_KEY);
+  if (saved !== null) $("gain").value = saved;  // a range input clamps itself
+  $("auto-level").checked = localStorage.getItem(AUTO_KEY) !== "0";
 } catch {}
 applyGain();
 
@@ -241,6 +261,9 @@ function renderActions(row, item) {
 
 function updateRow(row, item) {
   const p = row.parts;
+  // Re-read every poll: an active session's level firms up as it grows.
+  p.player.dataset.gainDb = item.gain_db ?? 0;
+  applyPlayerGain(p.player);
   p.title.textContent = item.label || fmtTime(item.start_utc);
   p.status.textContent = STATUS_LABEL[item.status] || item.status;
   p.status.className = `badge status ${item.status}`;
@@ -250,6 +273,11 @@ function updateRow(row, item) {
   else bits.push("auto backup");
   if (item.label) bits.push(fmtTime(item.start_utc));
   if (item.size_bytes) bits.push(fmtSize(item.size_bytes));
+  if (item.gain_db) bits.push(`${item.gain_db > 0 ? "+" : ""}${item.gain_db} dB`);
+  p.meta.title = item.gain_db
+    ? "Auto level: this transfer needs "
+      + `${item.gain_db > 0 ? "+" : ""}${item.gain_db} dB on playback.`
+    : "";
   p.meta.textContent = bits.join(" · ");
   p.warn.hidden = !item.has_gaps;
   if (row.status !== item.status) {
@@ -263,6 +291,7 @@ function renderHistory(items) {
   if (items.length === 0) {
     if (!box.querySelector(".empty")) {
       rows.clear();
+      gains.clear();  // the players go with the innerHTML below
       box.innerHTML = `<div class="empty">Nothing captured yet. Play a record
         and it shows up here on its own.</div>`;
     }
@@ -289,6 +318,7 @@ function renderHistory(items) {
   });
   for (const [key, row] of rows) {
     if (!seen.has(key)) {
+      gains.delete(row.parts.player);  // the node dies with the element
       row.el.remove();
       rows.delete(key);
     }

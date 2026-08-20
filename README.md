@@ -48,14 +48,21 @@ eventually reclaimed as the buffer fills.
   generated on the fly. Nothing is stored to preview something, and byte
   ranges map onto samples, so the player seeks freely even in a 20-minute
   side. Disk always holds FLAC; WAV exists only on the wire.
-- **Playback boost** (the *Boost* slider in the header, 0 to +24 dB) is a
-  Web Audio gain node in front of the browser's output, applied to every
-  player on the page and remembered across visits. Line-in from a phono
-  stage peaks well below full scale, so archives sound quiet next to
-  loudness-normalised sources; this matches them up without touching a byte
-  of the stored audio. It is not a fix for a genuinely weak input — check
-  the level meter while a record plays and raise the ALSA capture gain
-  (`amixer -c <card> sset Capture 80%`) if the RMS sits below −45 dBFS.
+- **Auto level** (on by default, in the *Playback* row above the list) gives
+  every entry its own gain so records cut at different levels play back
+  equally loud. Levels are measured while the audio is written — the RMS of
+  the whole entry and the level of its loudest 20 ms window — so the gain for
+  a 25-minute side is two database columns, not a re-read of the file. The
+  RMS is aimed at −18 dBFS, backed off if that would push the loudest window
+  past −9 dBFS. The window matters: vinyl is full of clicks, and normalising
+  to the loudest *sample* would let one scratch hold a whole quiet side down.
+  A boosted click may clip on output; it was already a click.
+- **Playback trim** (−12 to +24 dB) is a manual offset on top of auto level,
+  remembered across visits. Both are Web Audio gain nodes in front of the
+  browser's output: playback is the only thing that changes, downloads are
+  always the untouched transfer. Neither is a fix for a genuinely weak input
+  — check the level meter while a record plays and raise the ALSA capture
+  gain (`amixer -c <card> sset Capture 80%`) if the RMS sits below −45 dBFS.
 - **Keeping** extracts the exact sample range from the buffer segments into
   `recordings/` without pausing capture. Kept files are never deleted
   automatically; buffer segments fully covered by one are removed early to
@@ -185,7 +192,7 @@ and `aplay -D hw:CARD=Loopback,0,0 some.wav` to feed it.
 | Method & path | Description |
 |---|---|
 | `GET /api/status` | Capture state, input level, buffer fill, disk free, format |
-| `GET /api/history` | Sessions and kept recordings as one timeline |
+| `GET /api/history` | Sessions and kept recordings as one timeline, with playback `gain_db` |
 | `POST /api/record/start` / `stop` | Explicit recording (wins over detection) |
 | `GET /api/sessions/{id}/audio` | Stream a buffered session as WAV (Range OK) |
 | `POST /api/sessions/{id}/save` | Keep a session as FLAC (async, 202) |

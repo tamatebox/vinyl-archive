@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS segments (
     n_frames INTEGER NOT NULL,
     wall_start_utc TEXT NOT NULL,
     discontinuity INTEGER NOT NULL DEFAULT 0,
-    released_at REAL
+    released_at REAL,
+    short_peak REAL,
+    mean_sq REAL
 );
 CREATE INDEX IF NOT EXISTS idx_segments_start ON segments(start_sample);
 
@@ -59,7 +61,9 @@ CREATE TABLE IF NOT EXISTS recordings (
     duration_s REAL NOT NULL,
     size_bytes INTEGER NOT NULL,
     created_utc TEXT NOT NULL,
-    has_gaps INTEGER NOT NULL DEFAULT 0
+    has_gaps INTEGER NOT NULL DEFAULT 0,
+    short_peak REAL,
+    mean_sq REAL
 );
 """
 
@@ -81,6 +85,15 @@ class Database:
             if "kind" not in cols:  # pre-'kind' database
                 self._conn.execute("ALTER TABLE sessions ADD COLUMN"
                                    " kind TEXT NOT NULL DEFAULT 'auto'")
+            # Playback levels: nullable on purpose. Rows written before this
+            # existed keep NULL and play at unity rather than at a guess.
+            for table in ("segments", "recordings"):
+                have = [r[1] for r in
+                        self._conn.execute(f"PRAGMA table_info({table})")]
+                for col in ("short_peak", "mean_sq"):
+                    if col not in have:
+                        self._conn.execute(
+                            f"ALTER TABLE {table} ADD COLUMN {col} REAL")
             self._conn.commit()
 
     def close(self) -> None:
@@ -100,11 +113,14 @@ class Database:
     # -- segments ----------------------------------------------------------
 
     def add_segment(self, filename: str, start_sample: int, n_frames: int,
-                    wall_start_utc: str, discontinuity: bool = False) -> int:
+                    wall_start_utc: str, discontinuity: bool = False,
+                    short_peak: float | None = None,
+                    mean_sq: float | None = None) -> int:
         cur = self._exec(
-            "INSERT INTO segments (filename, start_sample, n_frames, wall_start_utc, discontinuity)"
-            " VALUES (?,?,?,?,?)",
-            (filename, start_sample, n_frames, wall_start_utc, int(discontinuity)),
+            "INSERT INTO segments (filename, start_sample, n_frames, wall_start_utc,"
+            " discontinuity, short_peak, mean_sq) VALUES (?,?,?,?,?,?,?)",
+            (filename, start_sample, n_frames, wall_start_utc, int(discontinuity),
+             short_peak, mean_sq),
         )
         return cur.lastrowid
 
@@ -117,6 +133,26 @@ class Database:
             " ORDER BY start_sample",
             (start_sample, end_sample),
         )
+
+    def level_in_range(self, start_sample: int,
+                       end_sample: int) -> tuple[float | None, float | None]:
+        """Playback levels of the buffered audio covering a sample range.
+
+        Whole segments are used even where the range only clips their edges:
+        including a little audio from outside can only over-state the level,
+        and over-stating it asks for less gain, never more. Segments with no
+        measurement (re-registered by ``reconcile``) sit out rather than
+        dragging the average toward silence.
+        """
+        rows = self._query(
+            "SELECT MAX(short_peak) AS short_peak,"
+            " SUM(mean_sq * n_frames) / SUM(n_frames) AS mean_sq"
+            " FROM segments WHERE start_sample + n_frames > ? AND start_sample < ?"
+            " AND short_peak IS NOT NULL AND mean_sq IS NOT NULL",
+            (start_sample, end_sample),
+        )
+        row = rows[0] if rows else {}
+        return row.get("short_peak"), row.get("mean_sq")
 
     def delete_segment(self, segment_id: int) -> None:
         self._exec("DELETE FROM segments WHERE id = ?", (segment_id,))
@@ -217,11 +253,14 @@ class Database:
     # -- recordings --------------------------------------------------------
 
     def add_recording(self, filename: str, session_id: int | None, duration_s: float,
-                      size_bytes: int, has_gaps: bool, label: str = "") -> int:
+                      size_bytes: int, has_gaps: bool, label: str = "",
+                      short_peak: float | None = None,
+                      mean_sq: float | None = None) -> int:
         cur = self._exec(
             "INSERT INTO recordings (filename, label, session_id, duration_s, size_bytes,"
-            " created_utc, has_gaps) VALUES (?,?,?,?,?,?,?)",
-            (filename, label, session_id, duration_s, size_bytes, utcnow_iso(), int(has_gaps)),
+            " created_utc, has_gaps, short_peak, mean_sq) VALUES (?,?,?,?,?,?,?,?,?)",
+            (filename, label, session_id, duration_s, size_bytes, utcnow_iso(),
+             int(has_gaps), short_peak, mean_sq),
         )
         return cur.lastrowid
 
