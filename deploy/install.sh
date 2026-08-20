@@ -10,12 +10,10 @@ echo "==> creating service user"
 id vinyl >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin vinyl
 usermod -aG audio vinyl
 
-echo "==> installing application to $APP_DIR"
+echo "==> creating the virtualenv in $APP_DIR"
 mkdir -p "$APP_DIR"
-cp -r vinyl_archive pyproject.toml "$APP_DIR"/
 python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --upgrade pip
-"$APP_DIR/venv/bin/pip" install "$APP_DIR"
 
 echo "==> creating data and config directories"
 mkdir -p "$DATA_DIR" "$CONF_DIR"
@@ -31,4 +29,9 @@ cp deploy/vinyl-archive.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable vinyl-archive
 
-echo "==> done. start with: systemctl start vinyl-archive"
+# The code sync, pre-flight check and (re)start live in one place, so
+# installing and updating cannot drift apart.
+echo "==> installing the application"
+sh deploy/update.sh
+
+echo "==> done. Later updates: git pull && sudo sh deploy/update.sh"
