@@ -3,6 +3,7 @@
 
 [server]
 host = "127.0.0.1"
+# Not the default 80: dev runs as a normal user, which may not bind it.
 port = 8000
 
 [paths]

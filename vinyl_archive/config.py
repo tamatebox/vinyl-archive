@@ -13,7 +13,10 @@ ENV_CONFIG = "VINYL_ARCHIVE_CONFIG"
 @dataclass(frozen=True)
 class ServerConfig:
     host: str = "0.0.0.0"
-    port: int = 8000
+    # 80 so the UI is just http://<pi>/ with no port to remember. The
+    # systemd unit grants CAP_NET_BIND_SERVICE for it; running outside that
+    # unit as a normal user needs a port above 1023 (see dev-config.toml).
+    port: int = 80
 
 
 @dataclass(frozen=True)

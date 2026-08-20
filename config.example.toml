@@ -2,10 +2,12 @@
 # Copy to /etc/vinyl-archive/config.toml (or point VINYL_ARCHIVE_CONFIG at it).
 
 [server]
-# Where the web UI binds. Ports below 1024 need extra privileges the
-# service does not have (see AmbientCapabilities in the systemd unit).
+# Where the web UI binds. Port 80 makes the UI plain http://<pi>/ with
+# nothing to type after the host; the systemd unit grants the service
+# CAP_NET_BIND_SERVICE so it may bind it. Any port above 1023 works too and
+# needs no privilege — the URL then carries it (http://<pi>:8000/).
 host = "0.0.0.0"
-port = 8000
+port = 80
 
 [paths]
 # buffer/, recordings/, db/ are created under this directory.

@@ -81,8 +81,10 @@ Then edit `/etc/vinyl-archive/config.toml`:
 1. Find your ADC's card name: `cat /proc/asound/cards`
 2. Set `[capture] device = "hw:CARD=<name>"` (names are stable across
    reboots; indexes are not).
-3. `sudo systemctl start vinyl-archive` and open `http://<pi>:8000/`
-   (the port is `[server] port`; the service reads it from this file).
+3. `sudo systemctl start vinyl-archive` and open `http://<pi>/` — port 80
+   by default, so there is no port to type. Change `[server] port` to move
+   it (the URL then needs it: `http://<pi>:8000/`); the service, and the
+   health check in `update.sh`, both read the port from this file.
 
 The web UI has no authentication — run it on a trusted LAN only.
 

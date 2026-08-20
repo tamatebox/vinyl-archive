@@ -18,6 +18,11 @@ Environment=PYTHONSAFEPATH=1
 # Hardening: the service may only write to its data directory. Add any
 # [paths] recordings_dir on another volume here too, or exports will fail.
 NoNewPrivileges=true
+# The one privilege it gets: bind [server] port 80, so the UI needs no port
+# in the URL. Nothing else in the bounding set, so nothing else is reachable
+# even if the default port is raised above 1023.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/vinyl-archive
