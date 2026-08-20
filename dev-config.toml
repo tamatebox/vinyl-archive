@@ -1,5 +1,5 @@
 # Local development config: synthetic ffmpeg audio source, data in ./dev-data.
-# Run with: VINYL_ARCHIVE_CONFIG=dev-config.toml .venv/bin/uvicorn vinyl_archive.main:app
+# Run with: VINYL_ARCHIVE_CONFIG=dev-config.toml .venv/bin/python -m vinyl_archive
 
 [server]
 host = "127.0.0.1"

@@ -6,13 +6,17 @@ After=sound.target network.target
 Type=exec
 User=vinyl
 Group=audio
-ExecStart=/opt/vinyl-archive/venv/bin/uvicorn vinyl_archive.main:app --host 0.0.0.0 --port 8000
+ExecStart=/opt/vinyl-archive/venv/bin/python -m vinyl_archive
 WorkingDirectory=/opt/vinyl-archive
 Restart=always
 RestartSec=3
 Environment=VINYL_ARCHIVE_CONFIG=/etc/vinyl-archive/config.toml
+# Keep the working directory off sys.path so the installed package is
+# always what runs, never a stray source copy next to it.
+Environment=PYTHONSAFEPATH=1
 
-# Hardening: the service may only write to its data directory.
+# Hardening: the service may only write to its data directory. Add any
+# [paths] recordings_dir on another volume here too, or exports will fail.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
