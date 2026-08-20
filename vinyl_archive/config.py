@@ -84,9 +84,12 @@ class CaptureConfig:
 @dataclass(frozen=True)
 class RingConfig:
     segment_seconds: int = 60
-    max_segments: int = 200
+    # 12 h of *playing* time (silence gating means idle hours cost nothing),
+    # ~4-6 GB of FLAC. The emergency free-space floor, not this cap, is what
+    # protects a small card.
+    max_segments: int = 720
     released_grace_seconds: float = 300.0
-    min_free_mb: int = 1024
+    min_free_mb: int = 2048
 
 
 @dataclass(frozen=True)

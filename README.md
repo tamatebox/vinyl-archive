@@ -13,7 +13,7 @@ the line input is treated identically.
 
 ```
 [USB ADC] → arecord (raw PCM) → capture thread
-              ├─ 60 s FLAC segments → buffer/   (ring buffer, ~3 h)
+              ├─ 60 s FLAC segments → buffer/   (ring buffer, ~12 h)
               ├─ silence detector   → sessions  (SQLite)
               └─ level / status     → web UI
 keep: session range → sample-accurate concat/trim → recordings/*.flac
