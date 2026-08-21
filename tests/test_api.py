@@ -64,6 +64,18 @@ def test_history_page_serves_ui(client):
     assert "History" in res.text
 
 
+def test_ui_assets_always_revalidate(client):
+    """A page and the scripts it loads are only versioned by being fetched
+    together, so neither may be served from cache without asking: an update
+    leaves open tabs holding a script that no longer matches the markup, which
+    shows up as a blank UI rather than an error."""
+    for path in ("/", "/history", "/static/app.js", "/static/common.js",
+                 "/static/style.css"):
+        res = client.get(path)
+        assert res.status_code == 200, path
+        assert res.headers["cache-control"] == "no-cache", path
+
+
 def test_icons_and_manifest_are_served(client):
     """Every icon the page or the manifest names must actually resolve.
 

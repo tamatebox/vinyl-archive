@@ -21,6 +21,22 @@ from .sessions.streamer import SessionStreamer
 STATIC_DIR = Path(__file__).parent / "web" / "static"
 ICON_DIR = STATIC_DIR / "icons"
 
+# The page and the scripts it loads are only versioned by being fetched
+# together: a cached script against a newly deployed page can leave the UI
+# blank, which is exactly what an update does to an already-open browser tab.
+# Starlette sends an ETag but no Cache-Control, and without one a browser may
+# reuse its copy without asking. These files are a few KB over a LAN, so
+# paying for a revalidation — usually a 304 — every time is the cheap side of
+# the trade.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class _RevalidatingStatic(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
@@ -64,18 +80,18 @@ def create_app(config: Config | None = None) -> FastAPI:
     app = FastAPI(title="vinyl-archive", lifespan=_lifespan)
     app.state.config = config or Config.load()
     app.include_router(router)
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/static", _RevalidatingStatic(directory=STATIC_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+        return FileResponse(STATIC_DIR / "index.html", headers=NO_CACHE)
 
     # A separate document rather than a tab: the two pages share no live
     # state, so each keeps its own row registry and its own fetch schedule
     # (the front page polls, this one loads once) with no wiring between them.
     @app.get("/history", include_in_schema=False)
     def history() -> FileResponse:
-        return FileResponse(STATIC_DIR / "history.html")
+        return FileResponse(STATIC_DIR / "history.html", headers=NO_CACHE)
 
     # Root-path icon requests: browsers ask for /favicon.ico on their own
     # before parsing any markup, and iOS looks for /apple-touch-icon.png at
