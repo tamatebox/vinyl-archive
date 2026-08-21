@@ -274,11 +274,10 @@ function renderActions(row, item) {
       box.append(b);
     }
     if (actionScope === "history") {
-      box.append(button("Delete", "danger", () => {
-        if (!confirm(`Delete "${item.label || fmtTime(item.start_utc)}" permanently?`))
-          throw new Error("cancelled");
-        return api(`/api/recordings/${item.id}`, { method: "DELETE" });
-      }));
+      // No confirmation: this moves it to the trash, where it stays visible
+      // and restorable until the volume actually needs the room. The dialog
+      // belongs on the step that cannot be undone.
+      box.append(button("Delete", "danger", () => patch({ trashed: true })));
     }
   }
 }

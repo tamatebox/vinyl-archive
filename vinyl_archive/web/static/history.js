@@ -185,9 +185,75 @@ function renderItems() {
     : "";
 }
 
+// -- trash --------------------------------------------------------------------
+
+// Its own shape, not a history row: nothing here is part of the timeline, and
+// the only questions are whether to take it back or let it go. No player —
+// the trash is not for listening — but the file is still downloadable, which
+// is the way to rescue one without restoring it.
+function renderTrash(trash) {
+  const box = $("trash-box");
+  if (!trash.items.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const n = trash.items.length;
+  $("trash-summary").textContent =
+    `Trash — ${n} ${n === 1 ? "entry" : "entries"}, ${fmtSize(trash.total_bytes)}`;
+
+  const list = $("trash");
+  list.innerHTML = "";
+  for (const item of trash.items) {
+    const el = document.createElement("div");
+    el.className = "item";
+    const row = document.createElement("div");
+    row.className = "row-main";
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = item.label || fmtTime(item.created_utc);
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = `${fmtDuration(item.duration_s)} · ${fmtSize(item.size_bytes)}`;
+    const actions = document.createElement("span");
+    actions.className = "actions";
+    const dl = document.createElement("a");
+    dl.className = "dl";
+    dl.href = item.download_url;
+    dl.download = "";
+    dl.textContent = "Download FLAC";
+    actions.append(
+      dl,
+      button("Restore", "secondary", () =>
+        api(`/api/recordings/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trashed: false }),
+        })),
+      // The one step that cannot be undone, and the only one that asks.
+      button("Delete permanently", "danger", () => {
+        if (!confirm(`Delete "${item.label || fmtTime(item.created_utc)}"`
+                     + " for good? The buffer copy is long gone, so this is"
+                     + " the only one left."))
+          throw new Error("cancelled");
+        return api(`/api/recordings/${item.id}`, { method: "DELETE" });
+      }),
+    );
+    row.append(title, meta, actions);
+    el.append(row);
+    list.append(el);
+  }
+}
+
+// -- loading ------------------------------------------------------------------
+
 async function load() {
   try {
-    items = await api("/api/history");
+    const [history, trash] = await Promise.all([
+      api("/api/history"), api("/api/trash"),
+    ]);
+    items = history;
+    renderTrash(trash);
   } catch (e) {
     $("history").innerHTML =
       `<div class="empty">Could not load the history: ${e.message}</div>`;

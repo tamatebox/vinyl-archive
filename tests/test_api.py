@@ -174,10 +174,35 @@ def test_save_download_rename_delete_flow(client, config):
     assert res.status_code == 200
     assert res.json()["label"] == "My Record"
 
-    res = client.delete(f"/api/recordings/{rec['id']}")
-    assert res.status_code == 204
+    # Deleting is two steps, enforced by the API rather than by a dialog: a
+    # kept transfer is the one thing here that cannot be recovered any other
+    # way, since the buffer copy is released minutes after Keep.
+    path = config.recordings_dir / rec["filename"]
+    assert client.delete(f"/api/recordings/{rec['id']}").status_code == 409
+    assert path.exists()
+
+    assert client.patch(f"/api/recordings/{rec['id']}",
+                        json={"trashed": True}).status_code == 200
+    assert client.get("/api/history").json() == []       # out of the timeline
+    trash = client.get("/api/trash").json()
+    assert [i["id"] for i in trash["items"]] == [rec["id"]]
+    assert trash["total_bytes"] == rec["size_bytes"]
+    assert path.exists()                                 # bytes are still here
+    assert client.get(f"/api/recordings/{rec['id']}/download").status_code == 200
+
+    # Restoring puts it back exactly where it was.
+    client.patch(f"/api/recordings/{rec['id']}", json={"trashed": False})
+    assert len(client.get("/api/history").json()) == 1
+    assert client.get("/api/trash").json()["items"] == []
+
+    client.patch(f"/api/recordings/{rec['id']}", json={"trashed": True})
+    assert client.delete(f"/api/recordings/{rec['id']}").status_code == 204
     assert client.get("/api/recordings").json() == []
-    assert not (config.recordings_dir / rec["filename"]).exists()
+    assert client.get("/api/trash").json()["items"] == []
+    assert not path.exists()
+    # The session outlived its recording; with the audio gone it is expired,
+    # not still 'saved' with nothing to point at.
+    assert client.app.state.db.get_session(sid)["state"] == "expired"
 
 
 def test_history_merges_sessions_and_recordings(client, config):

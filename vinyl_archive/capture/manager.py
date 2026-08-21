@@ -30,7 +30,8 @@ class CaptureManager:
         self._db = db
         rate = config.audio.sample_rate
 
-        self._gc = RingGC(db, config.buffer_dir, config.ring)
+        self._gc = RingGC(db, config.buffer_dir, config.ring,
+                          config.recordings_dir)
         self._writer = SegmentWriter(
             db, config.buffer_dir, rate, config.audio.channels,
             segment_frames=config.ring.segment_seconds * rate,

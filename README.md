@@ -36,6 +36,14 @@ show how far back the buffer still reaches. Nothing is pruned to keep the
 front page short: **Archive** on a kept entry takes it off the front page and
 changes nothing else, for transfers already copied off the Pi, and deleting is
 offered in the history rather than on the page you use every day.
+
+Deleting a kept recording puts it in the **Trash**, at the bottom of the
+history — still on disk, still downloadable, and given up only when the volume
+actually runs low, before any buffered audio and before any recording you have
+not deleted. Emptying it by hand is the one action that asks for confirmation:
+the buffer copy is released minutes after Keep, so a kept file is the only copy
+left. `deploy/install.sh` also enables weekly `fstrim`, since unlinking a file
+is not an erase and a card that never sees a discard loses write speed.
 Entries you **Keep** become permanent FLAC files — one click, no dialog, and
 **Rename** gives them a name whenever you get around to it; the rest are
 eventually reclaimed as the buffer fills.
@@ -237,7 +245,8 @@ screen shows no seam around the icon.
 | `GET /api/recordings` | Kept recordings |
 | `PATCH /api/recordings/{id}` | Rename (`{"label": "..."}`) or archive (`{"archived": true}`) |
 | `GET /api/recordings/{id}/download` | Download the FLAC |
-| `DELETE /api/recordings/{id}` | Delete a kept recording |
+| `DELETE /api/recordings/{id}` | Delete the file for good — only from the trash, 409 otherwise |
+| `GET /api/trash` | Discarded recordings and how much room they hold |
 | `POST /api/capture/start` / `stop` | Pause/resume continuous capture |
 | `GET /api/settings` | Editable settings + whether a restart is pending |
 | `PATCH /api/settings` | Update settings; applied live and persisted |

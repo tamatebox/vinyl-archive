@@ -67,7 +67,12 @@ CREATE TABLE IF NOT EXISTS recordings (
     -- Archived: off the front page, still in the full history, file
     -- untouched. Purely about where an entry is listed -- nothing reads this
     -- to decide whether bytes may go.
-    archived_at REAL
+    archived_at REAL,
+    -- Trashed: out of every list, file still on disk. The one flag the GC
+    -- does read, and only to choose what to give up first when the volume
+    -- runs low. Oldest trashed goes first, hence a timestamp rather than a
+    -- boolean.
+    trashed_at REAL
 );
 """
 
@@ -100,9 +105,10 @@ class Database:
                             f"ALTER TABLE {table} ADD COLUMN {col} REAL")
             have = [r[1] for r in
                     self._conn.execute("PRAGMA table_info(recordings)")]
-            if "archived_at" not in have:  # pre-'archive' database
-                self._conn.execute(
-                    "ALTER TABLE recordings ADD COLUMN archived_at REAL")
+            for col in ("archived_at", "trashed_at"):
+                if col not in have:  # pre-'archive' / pre-'trash' database
+                    self._conn.execute(
+                        f"ALTER TABLE recordings ADD COLUMN {col} REAL")
             self._conn.commit()
 
     def close(self) -> None:
@@ -287,7 +293,24 @@ class Database:
         return self._query("SELECT * FROM recordings ORDER BY created_utc DESC")
 
     def delete_recording(self, recording_id: int) -> None:
-        self._exec("DELETE FROM recordings WHERE id = ?", (recording_id,))
+        """Drop a keeper's row, and expire the session it came from.
+
+        Always both, in one transaction: by the time a recording's row goes,
+        its audio exists nowhere — the buffer copy was released minutes after
+        the export — and a session left at 'saved' with no recording to point
+        at shows up in no list at all. True of every caller: the permanent
+        delete, the GC purging the trash, and reconcile finding the file gone.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT session_id FROM recordings WHERE id = ?",
+                (recording_id,)).fetchone()
+            self._conn.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
+            if row is not None and row["session_id"] is not None:
+                self._conn.execute(
+                    "UPDATE sessions SET state = 'expired' WHERE id = ?",
+                    (row["session_id"],))
+            self._conn.commit()
 
     def set_recording_label(self, recording_id: int, label: str) -> None:
         self._exec("UPDATE recordings SET label = ? WHERE id = ?", (label, recording_id))
@@ -295,6 +318,17 @@ class Database:
     def set_recording_archived(self, recording_id: int, archived: bool) -> None:
         self._exec("UPDATE recordings SET archived_at = ? WHERE id = ?",
                    (time.time() if archived else None, recording_id))
+
+    def set_recording_trashed(self, recording_id: int, trashed: bool,
+                              at: float | None = None) -> None:
+        self._exec("UPDATE recordings SET trashed_at = ? WHERE id = ?",
+                   ((at if at is not None else time.time()) if trashed else None,
+                    recording_id))
+
+    def trashed_recordings(self) -> list[dict]:
+        """Oldest discard first — the order the GC gives them up in."""
+        return self._query("SELECT * FROM recordings WHERE trashed_at IS NOT NULL"
+                           " ORDER BY trashed_at")
 
 
 def reconcile(db: Database, buffer_dir: Path, recordings_dir: Path,

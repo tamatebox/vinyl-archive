@@ -23,6 +23,7 @@ class RecordingUpdate(BaseModel):
     "leave the name alone"."""
     label: str | None = None
     archived: bool | None = None
+    trashed: bool | None = None
 
 
 class SaveRequest(BaseModel):
@@ -185,6 +186,11 @@ def list_history(request: Request, buffered_limit: int | None = None,
     items = []
 
     for rec in db.list_recordings():
+        # Trashed entries are out of the timeline entirely, not scoped out of
+        # it: they are waiting to be given up, and GET /api/trash is where
+        # they are seen and undone.
+        if rec["trashed_at"] is not None:
+            continue
         if not include_archived and rec["archived_at"] is not None:
             continue
         sess = meta.get(rec["session_id"]) or {}
@@ -269,6 +275,8 @@ def update_recording(recording_id: int, body: RecordingUpdate,
         db.set_recording_label(recording_id, body.label.strip())
     if body.archived is not None:
         db.set_recording_archived(recording_id, body.archived)
+    if body.trashed is not None:
+        db.set_recording_trashed(recording_id, body.trashed)
     return db.get_recording(recording_id)
 
 
@@ -284,14 +292,47 @@ def download_recording(recording_id: int, request: Request) -> FileResponse:
     return FileResponse(path, media_type="audio/flac", filename=download_name)
 
 
+@router.get("/trash")
+def list_trash(request: Request) -> dict:
+    """What is waiting to be given up, and how much room it is holding.
+
+    The size is the point of showing this at all: the trash costs nothing
+    until the volume runs low, and then it is the first thing spent — so it
+    should never be invisible.
+    """
+    rows = request.app.state.db.trashed_recordings()
+    return {
+        "total_bytes": sum(r["size_bytes"] for r in rows),
+        "items": [
+            {"id": r["id"], "label": r["label"], "duration_s": r["duration_s"],
+             "size_bytes": r["size_bytes"], "created_utc": r["created_utc"],
+             "trashed_at": r["trashed_at"], "has_gaps": bool(r["has_gaps"]),
+             "download_url": f"/api/recordings/{r['id']}/download"}
+            # Newest discard first: reading order is the reverse of the order
+            # they are given up in.
+            for r in reversed(rows)
+        ],
+    }
+
+
 @router.delete("/recordings/{recording_id}", status_code=204)
 def delete_recording(recording_id: int, request: Request) -> None:
+    """Delete a recording's file for good.
+
+    Only from the trash. The two steps are an API invariant rather than a
+    dialog in the UI, so no client can destroy a kept transfer in one call —
+    and a kept transfer is the one thing here that cannot be recovered by
+    other means: five minutes after Keep, the buffer copy is gone.
+    """
     db = request.app.state.db
     rec = db.get_recording(recording_id)
     if rec is None:
         raise HTTPException(404, "recording not found")
+    if rec["trashed_at"] is None:
+        raise HTTPException(409, "recording is not in the trash; move it there"
+                                 " first (PATCH {\"trashed\": true})")
     (request.app.state.config.recordings_dir / rec["filename"]).unlink(missing_ok=True)
-    db.delete_recording(recording_id)
+    db.delete_recording(recording_id)   # also expires the session it came from
 
 
 @router.get("/settings")
