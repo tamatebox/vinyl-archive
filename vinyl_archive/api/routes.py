@@ -84,6 +84,23 @@ def delete_session(session_id: int, request: Request) -> None:
     db.delete_session(session_id)
 
 
+def _resolve_range(streamer, sess: dict) -> tuple[int, int]:
+    """Sample range to serve, or the reason there is nothing to serve.
+
+    "Not yet" and "not any more" are different failures with different fixes:
+    an active session becomes readable at the next segment rotation, while an
+    ended one with no audio left has been reclaimed by the ring buffer and
+    never will be.
+    """
+    start, end = streamer.resolve_range(sess)
+    if end <= start:
+        if sess["state"] == "active":
+            raise HTTPException(409, "session is still recording; no audio has "
+                                     "been closed into the buffer yet")
+        raise HTTPException(410, "no buffered audio remains for this session")
+    return start, end
+
+
 @router.get("/sessions/{session_id}/audio")
 def stream_session(session_id: int, request: Request):
     """Serve a buffered session as WAV, straight from the ring buffer.
@@ -97,10 +114,8 @@ def stream_session(session_id: int, request: Request):
         raise HTTPException(404, "session not found")
 
     streamer = request.app.state.streamer
-    start, end = streamer.resolve_range(sess)
+    start, end = _resolve_range(streamer, sess)
     total = streamer.wav_size(end - start)
-    if end <= start:
-        raise HTTPException(410, "no buffered audio remains for this session")
 
     byte_start, byte_end = 0, total
     status_code = 200
@@ -144,9 +159,7 @@ def download_session(session_id: int, request: Request):
         raise HTTPException(404, "session not found")
 
     streamer = request.app.state.streamer
-    start, end = streamer.resolve_range(sess)
-    if end <= start:
-        raise HTTPException(410, "no buffered audio remains for this session")
+    start, end = _resolve_range(streamer, sess)
 
     name = f"session_{session_id}_{sess['start_utc'].replace(':', '')}.flac"
     return StreamingResponse(

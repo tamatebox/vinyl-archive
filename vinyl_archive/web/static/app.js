@@ -17,7 +17,8 @@ const STATUS_LABEL = {
 };
 
 const STATUS_HINT = {
-  recording: "Still being recorded.",
+  recording: "Still being recorded. It becomes playable and downloadable "
+           + "as soon as it ends.",
   buffered: "Temporary: the ring buffer reclaims it as it fills up. "
           + "Press Keep to store it permanently.",
   saving: "Being written to a permanent file.",
@@ -54,6 +55,11 @@ function fmtDuration(s) {
   const m = Math.floor(s / 60);
   return `${m}m ${String(Math.round(s % 60)).padStart(2, "0")}s`;
 }
+
+// A session that has not ended has no end sample to measure, so its length
+// comes from the clock. Nothing is gated out while a session is open, so
+// elapsed wall-clock and recorded audio are the same span.
+const elapsedSince = (iso) => Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
 
 function fmtSize(bytes) {
   const mb = bytes / (1024 * 1024);
@@ -189,9 +195,26 @@ function createRow(item) {
     actions: el.querySelector(".actions"),
     player: el.querySelector(".player"),
   };
-  parts.player.src = item.audio_url;
   parts.player.addEventListener("play", onPlay);
   return { el, parts, status: null };
+}
+
+// An in-progress session is not an artifact yet: its length is still growing,
+// and a media element loaded now would stay pinned to the length it saw, so
+// the same row would keep playing a truncated take even after the session
+// ended. It gets its src on the way out of "recording" instead — and only
+// then, because assigning src reloads the element and would cut off playback
+// if it ran on every poll.
+function renderPlayer(row, item) {
+  const player = row.parts.player;
+  if (item.status === "recording") {
+    player.hidden = true;
+    return;
+  }
+  if (player.getAttribute("src") !== item.audio_url) {
+    player.src = item.audio_url;
+  }
+  player.hidden = false;
 }
 
 function button(label, cls, onClick) {
@@ -255,8 +278,6 @@ function renderActions(row, item) {
         return api(`/api/recordings/${item.id}`, { method: "DELETE" });
       }),
     );
-  } else if (item.status === "recording") {
-    box.append(downloadLink(item));
   }
 }
 
@@ -269,7 +290,9 @@ function updateRow(row, item) {
   p.status.textContent = STATUS_LABEL[item.status] || item.status;
   p.status.className = `badge status ${item.status}`;
   p.status.title = STATUS_HINT[item.status] || "";
-  const bits = [fmtDuration(item.duration_s)];
+  const bits = [item.status === "recording"
+    ? `${fmtDuration(elapsedSince(item.start_utc))} so far`
+    : fmtDuration(item.duration_s)];
   if (item.kind === "manual") bits.push("manual");
   else bits.push("auto backup");
   if (item.label) bits.push(fmtTime(item.start_utc));
@@ -282,6 +305,7 @@ function updateRow(row, item) {
   p.meta.textContent = bits.join(" · ");
   p.warn.hidden = !item.has_gaps;
   if (row.status !== item.status) {
+    renderPlayer(row, item);
     renderActions(row, item);
     row.status = item.status;
   }

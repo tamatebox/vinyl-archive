@@ -250,6 +250,20 @@ def test_download_session_without_buffered_audio_410(client):
     assert client.get("/api/sessions/999/download").status_code == 404
 
 
+def test_active_session_audio_is_409_not_410(client):
+    """"Nothing yet" and "nothing left" must not answer the same.
+
+    Both leave no samples to serve, but an active session becomes readable at
+    the next segment rotation while a reclaimed one never will.
+    """
+    db = client.app.state.db
+    sid = db.create_session(0, utcnow_iso())
+    for path in (f"/api/sessions/{sid}/audio", f"/api/sessions/{sid}/download"):
+        res = client.get(path)
+        assert res.status_code == 409, path
+        assert "still recording" in res.json()["detail"]
+
+
 def test_dismiss_buffered_session(client, config):
     sid = seed_session(client.app, config)
     assert client.delete(f"/api/sessions/{sid}").status_code == 204
