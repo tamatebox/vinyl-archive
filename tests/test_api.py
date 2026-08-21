@@ -58,6 +58,12 @@ def test_index_serves_ui(client):
     assert "vinyl-archive" in res.text
 
 
+def test_history_page_serves_ui(client):
+    res = client.get("/history")
+    assert res.status_code == 200
+    assert "History" in res.text
+
+
 def test_icons_and_manifest_are_served(client):
     """Every icon the page or the manifest names must actually resolve.
 
@@ -264,17 +270,50 @@ def test_active_session_audio_is_409_not_410(client):
         assert "still recording" in res.json()["detail"]
 
 
-def test_dismiss_buffered_session(client, config):
+def test_buffered_limit_is_a_recency_window(client):
+    """The front page asks for the newest few buffered entries only.
+
+    It is a window, not a pruning: the rows all survive, the full timeline
+    still returns them, and capture in progress is never dropped however small
+    the window is.
+    """
+    db = client.app.state.db
+    ended = []
+    for i in range(4):
+        sid = db.create_session(i * 1000, utcnow_iso())
+        db.close_session(sid, i * 1000 + 500, utcnow_iso())
+        ended.append(sid)
+    active = db.create_session(9000, utcnow_iso())
+
+    assert len(client.get("/api/history").json()) == 5
+
+    items = client.get("/api/history?buffered_limit=2").json()
+    status = {i["id"]: i["status"] for i in items}
+    assert set(status) == {ended[2], ended[3], active}
+    assert status[active] == "recording"
+
+    # A window wider than the buffer holds drops nothing.
+    items = client.get("/api/history?buffered_limit=50").json()
+    assert len(items) == 5
+
+    # Even a zero-width window keeps what is in progress.
+    items = client.get("/api/history?buffered_limit=0").json()
+    assert [i["id"] for i in items] == [active]
+
+    assert len(db.unsaved_sessions()) == 5  # nothing was pruned
+
+
+def test_session_metadata_cannot_be_destroyed(client, config):
+    """No route drops a session row any more.
+
+    Dismissing one never freed a byte — the ring reclaims the audio on its own
+    schedule either way — so the only thing it could do was make buffered audio
+    unreachable, since every audio route is keyed by session id.
+    """
     sid = seed_session(client.app, config)
-    assert client.delete(f"/api/sessions/{sid}").status_code == 204
-    assert client.get("/api/history").json() == []
-    # Only the history entry goes; the buffer is reclaimed on its own schedule.
-    assert client.app.state.db.list_segments()
-
-
-def test_dismiss_active_session_409(client):
-    sid = client.app.state.db.create_session(0, utcnow_iso())
-    assert client.delete(f"/api/sessions/{sid}").status_code == 409
+    assert client.delete(f"/api/sessions/{sid}").status_code == 404
+    assert client.app.state.db.get_session(sid) is not None
+    assert [i["id"] for i in client.get("/api/history").json()] == [sid]
 
 
 def test_manual_record_requires_running_capture(client):

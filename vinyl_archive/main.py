@@ -70,6 +70,13 @@ def create_app(config: Config | None = None) -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    # A separate document rather than a tab: the two pages share no live
+    # state, so each keeps its own row registry and its own fetch schedule
+    # (the front page polls, this one loads once) with no wiring between them.
+    @app.get("/history", include_in_schema=False)
+    def history() -> FileResponse:
+        return FileResponse(STATIC_DIR / "history.html")
+
     # Root-path icon requests: browsers ask for /favicon.ico on their own
     # before parsing any markup, and iOS looks for /apple-touch-icon.png at
     # the root for pages that carry no link tag. The manifest is served here

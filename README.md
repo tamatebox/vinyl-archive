@@ -27,6 +27,11 @@ the safety net for the times you forget to press record. Press **Record** to
 mark a take explicitly; that takes precedence over detection and is also the
 only way to capture something quieter than the detector's threshold. Every
 entry, explicit or automatic, can be played and downloaded straight away.
+The front page lists only the newest few buffered entries, so it stays the
+length of one sitting however long you leave it alone; **Full history** (`/history`)
+lists everything the buffer still holds along with every recording you kept.
+Nothing is pruned to keep the front page short, and there is no button that
+hides an entry: older ones are simply one page away.
 Entries you **Keep** become permanent FLAC files — one click, no dialog, and
 **Rename** gives them a name whenever you get around to it; the rest are
 eventually reclaimed as the buffer fills.
@@ -219,12 +224,11 @@ screen shows no seam around the icon.
 | Method & path | Description |
 |---|---|
 | `GET /api/status` | Capture state, input level, buffer fill, disk free, format |
-| `GET /api/history` | Sessions and kept recordings as one timeline, with playback `gain_db` |
+| `GET /api/history` | Sessions and kept recordings as one timeline, with playback `gain_db` (`?buffered_limit=N` for the front page's window) |
 | `POST /api/record/start` / `stop` | Explicit recording (wins over detection) |
 | `GET /api/sessions/{id}/audio` | Stream a buffered session as WAV (Range OK) |
 | `GET /api/sessions/{id}/download` | Download a buffered session as FLAC (no Range) |
 | `POST /api/sessions/{id}/save` | Keep a session as FLAC (async, 202) |
-| `DELETE /api/sessions/{id}` | Drop a buffered session from the history |
 | `GET /api/sessions` | Detected sessions (newest first) |
 | `GET /api/recordings` | Kept recordings |
 | `PATCH /api/recordings/{id}` | Rename (`{"label": "..."}`) |

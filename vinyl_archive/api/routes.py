@@ -69,21 +69,6 @@ async def save_session(session_id: int, request: Request,
     return {"status": "saving", "session_id": session_id}
 
 
-@router.delete("/sessions/{session_id}", status_code=204)
-def delete_session(session_id: int, request: Request) -> None:
-    """Drop a buffered session from the history. Its audio stays in the ring
-    buffer until the normal rotation reclaims it."""
-    db = request.app.state.db
-    sess = db.get_session(session_id)
-    if sess is None:
-        raise HTTPException(404, "session not found")
-    if sess["state"] == "saving":
-        raise HTTPException(409, "session is being saved")
-    if sess["state"] == "active":
-        raise HTTPException(409, "session is still recording")
-    db.delete_session(session_id)
-
-
 def _resolve_range(streamer, sess: dict) -> tuple[int, int]:
     """Sample range to serve, or the reason there is nothing to serve.
 
@@ -169,12 +154,20 @@ def download_session(session_id: int, request: Request):
 
 
 @router.get("/history")
-def list_history(request: Request) -> list[dict]:
+def list_history(request: Request, buffered_limit: int | None = None) -> list[dict]:
     """Sessions and saved recordings as one timeline.
 
     Both are playable and downloadable; the difference is only whether they
     survive — buffered entries are reclaimed by the ring buffer eventually,
     saved ones are kept until deleted by hand.
+
+    `buffered_limit` makes the front page a recency window instead of a list
+    that grows until someone prunes it: only the newest N buffered sessions
+    come back, and the rest are reached from /history. Capture in progress is
+    never dropped however small the window is — a recording or a save is an
+    event, not an entry waiting for a decision. Levels are measured only for
+    what is returned, so the front page's two-second poll does not pay for
+    every session still in the buffer.
     """
     db = request.app.state.db
     rate = request.app.state.config.audio.sample_rate
@@ -199,7 +192,16 @@ def list_history(request: Request) -> list[dict]:
             "download_url": f"/api/recordings/{rec['id']}/download",
         })
 
-    for sess in db.unsaved_sessions():
+    sessions = db.unsaved_sessions()  # oldest first
+    if buffered_limit is not None:
+        buffered = [s["id"] for s in sessions if s["state"] == "ended"]
+        # max(0, ...) on the count: a window wider than the buffer holds drops
+        # nothing, and a negative slice bound would silently invert that.
+        limit = max(0, buffered_limit)
+        dropped = set(buffered[:max(0, len(buffered) - limit)])
+        sessions = [s for s in sessions if s["id"] not in dropped]
+
+    for sess in sessions:
         end = sess["end_sample"]
         # An active session has no end yet: level it on what is flushed so far.
         short_peak, mean_sq = db.level_in_range(

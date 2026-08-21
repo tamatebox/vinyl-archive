@@ -43,7 +43,9 @@
     <p class="dim legend">Everything played is captured automatically and kept
     here temporarily. <b>Keep</b> makes an entry permanent in one click —
     name it afterwards with <b>Rename</b>; anything left buffered is
-    eventually reclaimed to make room. Both can be played and downloaded.</p>
+    eventually reclaimed to make room. Both can be played and downloaded.
+    Only the most recent buffered entries are listed here; the rest are in the
+    <a href="/history">full history</a>, not gone.</p>
     <div id="playback-bar">
       <span class="dim">Playback</span>
       <label class="check" title="Levels each entry on the way to the speakers
@@ -63,6 +65,7 @@ passages can clip on output.">
       </label>
     </div>
     <div id="history" class="list"></div>
+    <a class="more" href="/history">Full history →</a>
   </section>
 
   <section>
@@ -162,6 +165,7 @@ passages can clip on output.">
   <span id="disk-text" class="dim"></span>
 </footer>
 
+<script src="/static/common.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

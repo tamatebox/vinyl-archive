@@ -234,3 +234,15 @@ a.dl { text-decoration: none; }
 #settings-form p { margin: 0.7rem 0 0; }
 
 footer { padding: 1.5rem 1rem; }
+
+/* Link out of the front page's recency window into the full history. */
+.more {
+  align-self: flex-start;
+  margin-top: 0.7rem;
+  color: var(--dim);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+.more:hover { color: var(--fg); }
+a.back { color: inherit; text-decoration: none; }
+a.back:hover { color: var(--accent); }

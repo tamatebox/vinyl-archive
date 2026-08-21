@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History · vinyl-archive</title>
+<meta name="theme-color" content="#16181d">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vinyl">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1><a class="back" href="/">← vinyl-archive</a></h1>
+</header>
+
+<main>
+  <section>
+    <h2>History</h2>
+    <p class="dim legend">Everything the buffer still holds, plus every
+    recording you kept. Buffered entries are reclaimed as the ring fills up;
+    kept ones stay until you delete them. <b>Keep</b> works here too, for as
+    long as the audio is still in the buffer.</p>
+    <div id="playback-bar">
+      <span class="dim">Playback</span>
+      <label class="check" title="Levels each entry on the way to the speakers
+so records cut at different levels play back equally loud. Measured while the
+audio was captured: the RMS is aimed at -18 dBFS, backing off if that would
+push the loudest sample past -1 dBFS. The stored file is never modified — a
+download is always the untouched transfer.">
+        <input type="checkbox" id="auto-level" checked>
+        Auto level
+      </label>
+      <label id="gain-control" title="Manual offset on top of auto level, for
+when a transfer still sits wrong. Above 0 dB with auto level off, already-loud
+passages can clip on output.">
+        <span class="dim">Trim</span>
+        <input id="gain" type="range" min="-12" max="24" step="1" value="0">
+        <span id="gain-text" class="mono">0 dB</span>
+      </label>
+      <span class="spacer"></span>
+      <span id="count" class="dim"></span>
+      <button id="btn-reload" class="secondary">Reload</button>
+    </div>
+    <div id="history" class="list"></div>
+  </section>
+</main>
+
+<script src="/static/common.js"></script>
+<script src="/static/history.js"></script>
+</body>
+</html>
