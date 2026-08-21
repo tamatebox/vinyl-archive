@@ -23,11 +23,7 @@
 </head>
 <body>
 <header>
-  <!-- A page-level link, not part of either list below: both of them are
-       filtered views (a window over the buffer, and the kept entries that
-       have not been archived), and the full history is where the rest of
-       both live. -->
-  <h1>vinyl-archive <a class="nav" href="/history">History →</a></h1>
+  <h1>vinyl-archive</h1>
   <div id="status-bar">
     <span id="capture-state" class="badge">--</span>
     <div class="meter" title="Input level">
@@ -74,6 +70,13 @@ passages can clip on output.">
       <span class="dim">— permanent; <b>Archive</b> files one away without
       deleting it</span></h3>
     <div id="kept" class="list"></div>
+
+    <!-- Below both lists, not in the header: both are filtered views (a window
+         over the buffer, and the kept entries that have not been archived), so
+         the link belongs where a list runs out — after you have read it — and
+         not competing with the title. Above Settings, because it continues the
+         same reading and Settings ends the page. -->
+    <p class="page-nav"><a class="nav" href="/history">Full history →</a></p>
   </section>
 
   <section>

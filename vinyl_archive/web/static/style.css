@@ -246,6 +246,11 @@ a.nav, a.back {
 a.back { margin-left: 0; color: inherit; }
 a.nav:hover, a.back:hover { color: var(--accent); }
 
+/* The link out of the front page sits under the lists it continues, so it
+   reads as "and the rest is over there" rather than as a title. */
+.page-nav { margin: 1rem 0 0; }
+.page-nav a.nav { margin-left: 0; }
+
 /* Month calendar over the history list: an index, not a separate view. With
    no day picked the list below shows everything, so nothing is reachable
    only through the grid. */
