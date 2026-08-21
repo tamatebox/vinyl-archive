@@ -13,7 +13,7 @@ the line input is treated identically.
 
 ```
 [USB ADC] → arecord (raw PCM) → capture thread
-              ├─ 60 s FLAC segments → buffer/   (ring buffer, ~12 h)
+              ├─ 60 s FLAC segments → buffer/   (ring buffer, ~33 h played)
               ├─ silence detector   → sessions  (SQLite)
               └─ level / status     → web UI
 keep:     session range → sample-accurate concat/trim → recordings/*.flac
@@ -29,7 +29,9 @@ only way to capture something quieter than the detector's threshold. Every
 entry, explicit or automatic, can be played and downloaded straight away.
 The front page lists only the newest few buffered entries, so it stays the
 length of one sitting however long you leave it alone; **Full history** (`/history`)
-lists everything the buffer still holds along with every recording you kept.
+lists everything the buffer still holds along with every recording you kept,
+grouped by day with a month calendar above it — pick a day to see just that
+day, and the greyed-out cells show how far back the buffer still reaches.
 Nothing is pruned to keep the front page short, and there is no button that
 hides an entry: older ones are simply one page away.
 Entries you **Keep** become permanent FLAC files — one click, no dialog, and

@@ -42,14 +42,18 @@ silence_gating = true
 # command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "sine=frequency=440:duration=600", "-ac", "2", "-ar", "48000", "-f", "s16le", "-"]
 
 [ring]
-# 60 s * 720 segments = 12 h of temporary buffer, ~4-6 GB of FLAC. This is
-# 12 h of *playback*: with silence gating on, idle time costs nothing, so the
-# buffer holds roughly the last 30-40 record sides however long ago they
-# played. Raise it freely if the volume is big — 0.5 GB/h is the budget,
-# and 100 GB of buffer is a valid setting. Whichever limit is reached first
-# wins: over the cap, or below min_free_mb.
+# 60 s * 2000 segments = 33 h of temporary buffer, ~11-16 GB of FLAC (about
+# double at bit_depth 24). This is 33 h of *playback*: with silence gating on,
+# idle time costs nothing, so the buffer holds roughly the last 80-100 record
+# sides however long ago they played — which is why the history is grouped by
+# day and not by a fixed calendar span: how far back this reaches depends on
+# how much gets played, not on this number. Raise it freely if the volume is
+# big — 0.5 GB/h is the budget, and 100 GB of buffer is a valid setting.
+# Whichever limit is reached first wins: over the cap, or below min_free_mb.
+# Past ~20000 segments the per-rotation GC scan starts to cost real time on
+# the capture thread (~0.1 s here, several times that on a Pi).
 segment_seconds = 60
-max_segments = 720
+max_segments = 2000
 # Segments fully covered by a saved recording are deleted after this grace period.
 released_grace_seconds = 300
 # Emergency deletion threshold for free disk space on the buffer volume. This

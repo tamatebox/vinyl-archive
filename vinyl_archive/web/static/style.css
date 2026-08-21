@@ -246,3 +246,83 @@ footer { padding: 1.5rem 1rem; }
 .more:hover { color: var(--fg); }
 a.back { color: inherit; text-decoration: none; }
 a.back:hover { color: var(--accent); }
+
+/* Month calendar over the history list: an index, not a separate view. With
+   no day picked the list below shows everything, so nothing is reachable
+   only through the grid. */
+#calendar { margin: 0.6rem 0; }
+.cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+.cal-month { font-size: 0.9rem; color: var(--dim); }
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-wd {
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-align: center;
+  padding-bottom: 0.2rem;
+}
+/* 44px floor: these are the smallest touch targets in the UI and seven
+   columns leave them barely wider than that on a phone. */
+.cal-day {
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  padding: 0;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--dim);
+}
+.cal-day.outside { opacity: 0.3; }          /* buffer never reached this day */
+.cal-day.none { background: var(--panel); } /* in range, nothing was played */
+button.cal-day.has {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+  cursor: pointer;
+}
+button.cal-day.sel {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #16181d;
+}
+.cal-day .n { font-size: 0.65rem; opacity: 0.8; }
+
+#selection { margin: 0 0 0.6rem; }
+button.chip { background: var(--panel); color: var(--text); }
+
+/* Sticky so the date stays visible while its entries scroll past. */
+.day-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  color: var(--dim);
+  font-size: 0.8rem;
+  padding: 0.5rem 0 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+button.play { background: var(--panel); color: var(--text); }
+.player-slot:empty { display: none; }
+.player-slot .player { width: 100%; margin-top: 0.5rem; height: 34px; }
+
+/* The front page keeps the two apart: one list is a decision waiting to be
+   made, the other is the archive. Merging them hid the first inside the
+   second, and they are scoped differently anyway (a window vs everything). */
+.list-head {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 1.4rem 0 0.5rem;
+}
+.list-head .dim { font-weight: 400; }

@@ -87,10 +87,15 @@ class CaptureConfig:
 @dataclass(frozen=True)
 class RingConfig:
     segment_seconds: int = 60
-    # 12 h of *playing* time (silence gating means idle hours cost nothing),
-    # ~4-6 GB of FLAC. The emergency free-space floor, not this cap, is what
-    # protects a small card.
-    max_segments: int = 720
+    # 33 h of *playing* time (silence gating means idle hours cost nothing),
+    # ~11-16 GB of FLAC at 48 kHz/16-bit stereo — roughly double that at 24.
+    # The emergency free-space floor, not this cap, is what protects a small
+    # card: where the card cannot hold this much, min_free_mb binds first and
+    # the cap simply never applies. How far back that reaches in wall-clock
+    # time is not a property of this number — it depends entirely on how much
+    # gets played, so the history groups itself by day rather than assuming a
+    # span.
+    max_segments: int = 2000
     released_grace_seconds: float = 300.0
     min_free_mb: int = 2048
 

@@ -40,12 +40,10 @@
 <main>
   <section>
     <h2>History</h2>
-    <p class="dim legend">Everything played is captured automatically and kept
-    here temporarily. <b>Keep</b> makes an entry permanent in one click —
-    name it afterwards with <b>Rename</b>; anything left buffered is
-    eventually reclaimed to make room. Both can be played and downloaded.
-    Only the most recent buffered entries are listed here; the rest are in the
-    <a href="/history">full history</a>, not gone.</p>
+    <p class="dim legend">Everything played is captured automatically. Anything
+    left in the buffer is eventually reclaimed to make room; <b>Keep</b> makes
+    an entry permanent in one click — name it afterwards with <b>Rename</b>.
+    Both can be played and downloaded.</p>
     <div id="playback-bar">
       <span class="dim">Playback</span>
       <label class="check" title="Levels each entry on the way to the speakers
@@ -64,8 +62,14 @@ passages can clip on output.">
         <span id="gain-text" class="mono">0 dB</span>
       </label>
     </div>
-    <div id="history" class="list"></div>
+    <h3 class="list-head">In the buffer
+      <span class="dim">— temporary, and waiting for a decision</span></h3>
+    <div id="buffered" class="list"></div>
     <a class="more" href="/history">Full history →</a>
+
+    <h3 class="list-head">Kept
+      <span class="dim">— permanent, until you delete them</span></h3>
+    <div id="kept" class="list"></div>
   </section>
 
   <section>

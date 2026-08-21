@@ -159,35 +159,40 @@ function createRow(item) {
       <span class="warn" hidden title="${GAPS_HINT}">⚠ has gaps</span>
       <span class="actions"></span>
     </div>
-    <audio class="player" controls preload="none"></audio>`;
+    <div class="player-slot"></div>`;
   const parts = {
     title: el.querySelector(".title"),
     status: el.querySelector(".status"),
     meta: el.querySelector(".meta"),
     warn: el.querySelector(".warn"),
     actions: el.querySelector(".actions"),
-    player: el.querySelector(".player"),
+    slot: el.querySelector(".player-slot"),
+    player: null,   // built on first Play, see playButton
   };
-  parts.player.addEventListener("play", onPlay);
-  return { el, parts, status: null };
+  return { el, parts, status: null, gainDb: 0 };
 }
 
-// An in-progress session is not an artifact yet: its length is still growing,
-// and a media element loaded now would stay pinned to the length it saw, so
-// the same row would keep playing a truncated take even after the session
-// ended. It gets its src on the way out of "recording" instead — and only
-// then, because assigning src reloads the element and would cut off playback
-// if it ran on every poll.
-function renderPlayer(row, item) {
-  const player = row.parts.player;
-  if (item.status === "recording") {
-    player.hidden = true;
-    return;
-  }
-  if (player.getAttribute("src") !== item.audio_url) {
-    player.src = item.audio_url;
-  }
-  player.hidden = false;
+// A media element per entry is the one expensive thing about a long list, and
+// the unfiltered history can run to hundreds of rows. The rest of a row is
+// text, so the player is built when it is actually wanted — which also means
+// an entry that is never played costs nothing beyond its text.
+function playButton(row, item) {
+  const btn = document.createElement("button");
+  btn.className = "play";
+  btn.textContent = "▶ Play";
+  btn.onclick = () => {
+    btn.remove();
+    const el = document.createElement("audio");
+    el.className = "player";
+    el.controls = true;
+    el.autoplay = true;   // the click that built it is the gesture
+    el.dataset.gainDb = row.gainDb;
+    el.addEventListener("play", onPlay);
+    el.src = item.audio_url;
+    row.parts.slot.append(el);
+    row.parts.player = el;
+  };
+  return btn;
 }
 
 function button(label, cls, onClick) {
@@ -227,6 +232,9 @@ function downloadLink(item) {
 function renderActions(row, item) {
   const box = row.parts.actions;
   box.innerHTML = "";
+  if (item.status !== "recording" && !row.parts.player) {
+    box.append(playButton(row, item));
+  }
   if (item.status === "buffered") {
     box.append(
       // Keep is one click: naming is a separate Rename action on the kept
@@ -259,8 +267,11 @@ function renderActions(row, item) {
 function updateRow(row, item) {
   const p = row.parts;
   // Re-read every poll: an active session's level firms up as it grows.
-  p.player.dataset.gainDb = item.gain_db ?? 0;
-  applyPlayerGain(p.player);
+  row.gainDb = item.gain_db ?? 0;
+  if (p.player) {
+    p.player.dataset.gainDb = row.gainDb;
+    applyPlayerGain(p.player);
+  }
   p.title.textContent = item.label || fmtTime(item.start_utc);
   p.status.textContent = STATUS_LABEL[item.status] || item.status;
   p.status.className = `badge status ${item.status}`;
@@ -280,18 +291,38 @@ function updateRow(row, item) {
   p.meta.textContent = bits.join(" · ");
   p.warn.hidden = !item.has_gaps;
   if (row.status !== item.status) {
-    renderPlayer(row, item);
     renderActions(row, item);
     row.status = item.status;
   }
 }
 
+// Local calendar day of an entry, as YYYY-MM-DD. The server stores UTC and
+// never guesses a timezone; the browser is the only party that knows which
+// day 23:40Z belongs to, so every day boundary in the UI is computed here.
+function localDayKey(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+       + `-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function dayHeading(dayKey) {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    weekday: "short", month: "short", day: "numeric",
+  });
+}
+
 // `rows` is the caller's registry (key -> row), so each page owns its own.
-function renderList(box, rows, items, emptyHtml) {
+// With groupByDay, a heading is inserted whenever the local date changes:
+// headings hold no state, so they are rebuilt every render while the rows
+// themselves are moved, never recreated.
+function renderList(box, rows, items, emptyHtml, groupByDay = false) {
+  for (const head of box.querySelectorAll(".day-head")) head.remove();
+
   if (items.length === 0) {
     if (!box.querySelector(".empty")) {
+      for (const [, row] of rows) gains.delete(row.parts.player);
       rows.clear();
-      gains.clear();  // the players go with the innerHTML below
       box.innerHTML = `<div class="empty">${emptyHtml}</div>`;
     }
     return;
@@ -300,9 +331,19 @@ function renderList(box, rows, items, emptyHtml) {
   if (empty) empty.remove();
 
   const seen = new Set();
-  // Rows are updated in place rather than rebuilt, so polling never
-  // interrupts a player that is mid-playback.
-  items.forEach((item, index) => {
+  const order = [];
+  let day = null;
+  for (const item of items) {
+    if (groupByDay) {
+      const key = localDayKey(item.start_utc);
+      if (key !== day) {
+        day = key;
+        const head = document.createElement("div");
+        head.className = "day-head";
+        head.textContent = dayHeading(key);
+        order.push(head);
+      }
+    }
     const key = keyOf(item);
     seen.add(key);
     let row = rows.get(key);
@@ -311,10 +352,9 @@ function renderList(box, rows, items, emptyHtml) {
       rows.set(key, row);
     }
     updateRow(row, item);
-    if (box.children[index] !== row.el) {
-      box.insertBefore(row.el, box.children[index] || null);
-    }
-  });
+    order.push(row.el);
+  }
+
   for (const [key, row] of rows) {
     if (!seen.has(key)) {
       gains.delete(row.parts.player);  // the node dies with the element
@@ -322,4 +362,12 @@ function renderList(box, rows, items, emptyHtml) {
       rows.delete(key);
     }
   }
+  // Rows are moved rather than rebuilt, so neither polling nor a change of
+  // filter interrupts a player that is mid-playback: insertBefore relocates
+  // the existing element instead of replacing it.
+  order.forEach((node, index) => {
+    if (box.children[index] !== node) {
+      box.insertBefore(node, box.children[index] || null);
+    }
+  });
 }

@@ -99,7 +99,11 @@ $("btn-stop").onclick = () => {
 
 // -- polling ------------------------------------------------------------------
 
-const rows = new Map();  // key -> {el, parts, status}
+// One registry per list: rows are matched by key within their own list, so
+// an entry moving from the buffer to the archive is a new row in the second
+// list rather than a row that changed section under the diff.
+const bufferedRows = new Map();
+const keptRows = new Map();
 
 async function refresh() {
   try {
@@ -108,9 +112,14 @@ async function refresh() {
       api(`/api/history?buffered_limit=${BUFFERED_LIMIT}`),
     ]);
     renderStatus(status);
-    renderList($("history"), rows, history,
-               `Nothing captured yet. Play a record and it shows up here on
+    // Split on permanence, not on type: a session being written out is still
+    // the thing you were deciding about, so "Keeping…" belongs above the line
+    // until the file exists.
+    renderList($("buffered"), bufferedRows, history.filter((i) => !i.permanent),
+               `Nothing in the buffer. Play a record and it shows up here on
                 its own.`);
+    renderList($("kept"), keptRows, history.filter((i) => i.permanent),
+               "Nothing kept yet. Press Keep on an entry above.");
   } catch (e) {
     $("capture-state").textContent = "Connection error";
     $("capture-state").className = "badge stopped";
