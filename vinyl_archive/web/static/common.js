@@ -132,7 +132,15 @@ function routePlayer(el) {
   }
 }
 
+// Every player that exists, so starting one can stop the rest. Two sides
+// playing at once is never what was meant by pressing Play on the second —
+// the transport bars sit one under the other and both keep going.
+const players = new Set();
+
 function onPlay(ev) {
+  for (const el of players) {
+    if (el !== ev.target && !el.paused) el.pause();
+  }
   routePlayer(ev.target);
   if (audioCtx) audioCtx.resume().catch(() => {});
 }
@@ -173,32 +181,38 @@ function createRow(item) {
     warn: el.querySelector(".warn"),
     actions: el.querySelector(".actions"),
     slot: el.querySelector(".player-slot"),
-    player: null,   // built on first Play, see playButton
+    player: null,   // set by ensurePlayer once there is audio to play
   };
   return { el, parts, status: null, archived: null, gainDb: 0 };
 }
 
-// A media element per entry is the one expensive thing about a long list, and
-// the unfiltered history can run to hundreds of rows. The rest of a row is
-// text, so the player is built when it is actually wanted — which also means
-// an entry that is never played costs nothing beyond its text.
-function playButton(row, item) {
-  const btn = document.createElement("button");
-  btn.className = "play";
-  btn.textContent = "▶ Play";
-  btn.onclick = () => {
-    btn.remove();
-    const el = document.createElement("audio");
-    el.className = "player";
-    el.controls = true;
-    el.autoplay = true;   // the click that built it is the gesture
-    el.dataset.gainDb = row.gainDb;
-    el.addEventListener("play", onPlay);
-    el.src = item.audio_url;
-    row.parts.slot.append(el);
-    row.parts.player = el;
-  };
-  return btn;
+// One media element per row, built with the row. Nothing is fetched until
+// Play is pressed: `preload="none"` keeps a list of hundreds of rows to
+// hundreds of idle elements instead of hundreds of requests, each of which
+// would have the Pi assemble a WAV out of buffer segments just to read a
+// duration. A row that is never played still costs no audio I/O.
+function ensurePlayer(row, item) {
+  if (row.parts.player || item.status === "recording") return;
+  const el = document.createElement("audio");
+  el.className = "player";
+  el.controls = true;
+  el.preload = "none";
+  el.dataset.gainDb = row.gainDb;
+  el.addEventListener("play", onPlay);
+  el.src = item.audio_url;
+  row.parts.slot.append(el);
+  row.parts.player = el;
+  players.add(el);
+}
+
+// A row leaving the list takes its nodes with it: the gain node dies with the
+// element, and a paused element left in the registry would keep the whole row
+// alive for nothing.
+function forgetPlayer(row) {
+  const el = row.parts.player;
+  if (!el) return;
+  gains.delete(el);
+  players.delete(el);
 }
 
 function button(label, cls, onClick) {
@@ -238,9 +252,6 @@ function downloadLink(item) {
 function renderActions(row, item) {
   const box = row.parts.actions;
   box.innerHTML = "";
-  if (item.status !== "recording" && !row.parts.player) {
-    box.append(playButton(row, item));
-  }
   if (item.status === "buffered") {
     box.append(
       // Keep is one click: naming is a separate Rename action on the kept
@@ -286,6 +297,7 @@ function updateRow(row, item) {
   const p = row.parts;
   // Re-read every poll: an active session's level firms up as it grows.
   row.gainDb = item.gain_db ?? 0;
+  ensurePlayer(row, item);
   if (p.player) {
     p.player.dataset.gainDb = row.gainDb;
     applyPlayerGain(p.player);
@@ -341,7 +353,7 @@ function renderList(box, rows, items, emptyHtml, groupByDay = false) {
 
   if (items.length === 0) {
     if (!box.querySelector(".empty")) {
-      for (const [, row] of rows) gains.delete(row.parts.player);
+      for (const [, row] of rows) forgetPlayer(row);
       rows.clear();
       box.innerHTML = `<div class="empty">${emptyHtml}</div>`;
     }
@@ -377,7 +389,7 @@ function renderList(box, rows, items, emptyHtml, groupByDay = false) {
 
   for (const [key, row] of rows) {
     if (!seen.has(key)) {
-      gains.delete(row.parts.player);  // the node dies with the element
+      forgetPlayer(row);
       row.el.remove();
       rows.delete(key);
     }

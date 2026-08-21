@@ -312,9 +312,10 @@ button.chip { background: var(--panel); color: var(--text); }
   padding: 0.5rem 0 0.2rem;
   border-bottom: 1px solid var(--border);
 }
-button.play { background: var(--panel); color: var(--text); }
+/* Empty only while a session is still being recorded: there is nothing to
+   play yet, so the row shows no transport at all. */
 .player-slot:empty { display: none; }
-.player-slot .player { width: 100%; margin-top: 0.5rem; height: 34px; }
+.player-slot .player { width: 100%; height: 34px; }
 
 /* The front page keeps the two apart: one list is a decision waiting to be
    made, the other is the archive. Merging them hid the first inside the
