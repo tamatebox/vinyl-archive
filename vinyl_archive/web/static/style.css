@@ -235,17 +235,16 @@ a.dl { text-decoration: none; }
 
 footer { padding: 1.5rem 1rem; }
 
-/* Link out of the front page's recency window into the full history. */
-.more {
-  align-self: flex-start;
-  margin-top: 0.7rem;
+/* Page-level links between the front page and the full history. */
+a.nav, a.back {
   color: var(--dim);
   font-size: 0.85rem;
+  font-weight: 400;
   text-decoration: none;
+  margin-left: 0.6rem;
 }
-.more:hover { color: var(--fg); }
-a.back { color: inherit; text-decoration: none; }
-a.back:hover { color: var(--accent); }
+a.back { margin-left: 0; color: inherit; }
+a.nav:hover, a.back:hover { color: var(--accent); }
 
 /* Month calendar over the history list: an index, not a separate view. With
    no day picked the list below shows everything, so nothing is reachable

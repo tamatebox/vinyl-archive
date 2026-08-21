@@ -105,6 +105,23 @@ def test_pre_level_database_gains_the_playback_columns(tmp_path, config):
         db.close()
 
 
+def test_pre_archive_database_gains_the_archive_column(tmp_path):
+    """An upgrade must not archive anything that was visible before it."""
+    path = tmp_path / "vinyl.sqlite3"
+    make_old_db(path)
+
+    db = Database(path)
+    try:
+        rec = db.list_recordings()[0]
+        assert rec["archived_at"] is None       # existing keepers stay listed
+        db.set_recording_archived(rec["id"], True)
+        assert db.get_recording(rec["id"])["archived_at"] is not None
+        db.set_recording_archived(rec["id"], False)
+        assert db.get_recording(rec["id"])["archived_at"] is None
+    finally:
+        db.close()
+
+
 def test_migration_is_idempotent(tmp_path):
     path = tmp_path / "vinyl.sqlite3"
     make_old_db(path)

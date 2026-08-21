@@ -63,7 +63,11 @@ CREATE TABLE IF NOT EXISTS recordings (
     created_utc TEXT NOT NULL,
     has_gaps INTEGER NOT NULL DEFAULT 0,
     short_peak REAL,
-    mean_sq REAL
+    mean_sq REAL,
+    -- Archived: off the front page, still in the full history, file
+    -- untouched. Purely about where an entry is listed -- nothing reads this
+    -- to decide whether bytes may go.
+    archived_at REAL
 );
 """
 
@@ -94,6 +98,11 @@ class Database:
                     if col not in have:
                         self._conn.execute(
                             f"ALTER TABLE {table} ADD COLUMN {col} REAL")
+            have = [r[1] for r in
+                    self._conn.execute("PRAGMA table_info(recordings)")]
+            if "archived_at" not in have:  # pre-'archive' database
+                self._conn.execute(
+                    "ALTER TABLE recordings ADD COLUMN archived_at REAL")
             self._conn.commit()
 
     def close(self) -> None:
@@ -269,6 +278,12 @@ class Database:
         return rows[0] if rows else None
 
     def list_recordings(self) -> list[dict]:
+        """Every recording, archived ones included.
+
+        Deliberately unfiltered: `reconcile` walks this to drop rows whose
+        file has gone, so hiding rows here would leak them instead. Callers
+        that want a subset filter it themselves.
+        """
         return self._query("SELECT * FROM recordings ORDER BY created_utc DESC")
 
     def delete_recording(self, recording_id: int) -> None:
@@ -276,6 +291,10 @@ class Database:
 
     def set_recording_label(self, recording_id: int, label: str) -> None:
         self._exec("UPDATE recordings SET label = ? WHERE id = ?", (label, recording_id))
+
+    def set_recording_archived(self, recording_id: int, archived: bool) -> None:
+        self._exec("UPDATE recordings SET archived_at = ? WHERE id = ?",
+                   (time.time() if archived else None, recording_id))
 
 
 def reconcile(db: Database, buffer_dir: Path, recordings_dir: Path,

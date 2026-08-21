@@ -30,6 +30,12 @@ const $ = (id) => document.getElementById(id);
 // Set by each page: what to reload after an action changed something.
 let onMutated = () => {};
 
+// Which actions a kept entry offers. The front page only tidies (Archive is
+// reversible and touches no bytes); deleting is offered where the entry
+// still is afterwards, which is the full history. Keeping the destructive
+// action off the page you look at every day is the point, not an oversight.
+let actionScope = "front";   // "front" | "history"
+
 async function api(path, options) {
   const res = await fetch(path, options);
   if (!res.ok && res.status !== 202) {
@@ -169,7 +175,7 @@ function createRow(item) {
     slot: el.querySelector(".player-slot"),
     player: null,   // built on first Play, see playButton
   };
-  return { el, parts, status: null, gainDb: 0 };
+  return { el, parts, status: null, archived: null, gainDb: 0 };
 }
 
 // A media element per entry is the one expensive thing about a long list, and
@@ -244,23 +250,36 @@ function renderActions(row, item) {
       downloadLink(item),
     );
   } else if (item.status === "saved") {
+    const patch = (body) => api(`/api/recordings/${item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     box.append(
       downloadLink(item),
       button("Rename", "secondary", () => {
         const label = prompt("Recording name:", item.label || "");
         if (label === null) throw new Error("cancelled");
-        return api(`/api/recordings/${item.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ label }),
-        });
+        return patch({ label });
       }),
-      button("Delete", "danger", () => {
+    );
+    if (item.archived) {
+      box.append(button("Unarchive", "secondary", () => patch({ archived: false })));
+    } else {
+      // No confirm: it is reversible, the file is untouched, and the entry is
+      // still in the history a click away.
+      const b = button("Archive", "secondary", () => patch({ archived: true }));
+      b.title = "Off the front page, still here. Nothing is deleted — for "
+              + "transfers you have already copied off the Pi.";
+      box.append(b);
+    }
+    if (actionScope === "history") {
+      box.append(button("Delete", "danger", () => {
         if (!confirm(`Delete "${item.label || fmtTime(item.start_utc)}" permanently?`))
           throw new Error("cancelled");
         return api(`/api/recordings/${item.id}`, { method: "DELETE" });
-      }),
-    );
+      }));
+    }
   }
 }
 
@@ -281,6 +300,7 @@ function updateRow(row, item) {
     : fmtDuration(item.duration_s)];
   if (item.kind === "manual") bits.push("manual");
   else bits.push("auto backup");
+  if (item.archived) bits.push("archived");
   if (item.label) bits.push(fmtTime(item.start_utc));
   if (item.size_bytes) bits.push(fmtSize(item.size_bytes));
   if (item.gain_db) bits.push(`${item.gain_db > 0 ? "+" : ""}${item.gain_db} dB`);
@@ -290,9 +310,10 @@ function updateRow(row, item) {
     : "";
   p.meta.textContent = bits.join(" · ");
   p.warn.hidden = !item.has_gaps;
-  if (row.status !== item.status) {
+  if (row.status !== item.status || row.archived !== item.archived) {
     renderActions(row, item);
     row.status = item.status;
+    row.archived = item.archived;
   }
 }
 

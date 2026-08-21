@@ -17,8 +17,12 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 
-class LabelUpdate(BaseModel):
-    label: str
+class RecordingUpdate(BaseModel):
+    """Both fields optional: a PATCH may set either without touching the
+    other, and `label: ""` clearing a name has to stay distinguishable from
+    "leave the name alone"."""
+    label: str | None = None
+    archived: bool | None = None
 
 
 class SaveRequest(BaseModel):
@@ -154,7 +158,8 @@ def download_session(session_id: int, request: Request):
 
 
 @router.get("/history")
-def list_history(request: Request, buffered_limit: int | None = None) -> list[dict]:
+def list_history(request: Request, buffered_limit: int | None = None,
+                 include_archived: bool = True) -> list[dict]:
     """Sessions and saved recordings as one timeline.
 
     Both are playable and downloadable; the difference is only whether they
@@ -168,6 +173,11 @@ def list_history(request: Request, buffered_limit: int | None = None) -> list[di
     event, not an entry waiting for a decision. Levels are measured only for
     what is returned, so the front page's two-second poll does not pay for
     every session still in the buffer.
+
+    `include_archived=false` drops kept recordings that have been archived,
+    which is the other half of the front page's scoping: one list is a window
+    over the buffer, the other is what has not been filed away yet. Archiving
+    moves nothing and deletes nothing — the file and the row are untouched.
     """
     db = request.app.state.db
     rate = request.app.state.config.audio.sample_rate
@@ -175,6 +185,8 @@ def list_history(request: Request, buffered_limit: int | None = None) -> list[di
     items = []
 
     for rec in db.list_recordings():
+        if not include_archived and rec["archived_at"] is not None:
+            continue
         sess = meta.get(rec["session_id"]) or {}
         items.append({
             "type": "recording",
@@ -186,6 +198,7 @@ def list_history(request: Request, buffered_limit: int | None = None) -> list[di
             "status": "saved",
             "permanent": True,
             "has_gaps": bool(rec["has_gaps"]),
+            "archived": rec["archived_at"] is not None,
             "size_bytes": rec["size_bytes"],
             "gain_db": auto_gain_db(rec["short_peak"], rec["mean_sq"]),
             "audio_url": f"/api/recordings/{rec['id']}/download",
@@ -219,6 +232,7 @@ def list_history(request: Request, buffered_limit: int | None = None) -> list[di
                        "saving": "saving"}.get(sess["state"], "buffered"),
             "permanent": False,
             "has_gaps": bool(sess["truncated_head"]),
+            "archived": False,
             "size_bytes": None,
             "gain_db": auto_gain_db(short_peak, mean_sq),
             "audio_url": f"/api/sessions/{sess['id']}/audio",
@@ -246,11 +260,15 @@ def list_recordings(request: Request) -> list[dict]:
 
 
 @router.patch("/recordings/{recording_id}")
-def update_recording(recording_id: int, body: LabelUpdate, request: Request) -> dict:
+def update_recording(recording_id: int, body: RecordingUpdate,
+                     request: Request) -> dict:
     db = request.app.state.db
     if db.get_recording(recording_id) is None:
         raise HTTPException(404, "recording not found")
-    db.set_recording_label(recording_id, body.label.strip())
+    if body.label is not None:
+        db.set_recording_label(recording_id, body.label.strip())
+    if body.archived is not None:
+        db.set_recording_archived(recording_id, body.archived)
     return db.get_recording(recording_id)
 
 

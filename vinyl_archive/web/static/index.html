@@ -23,7 +23,11 @@
 </head>
 <body>
 <header>
-  <h1>vinyl-archive</h1>
+  <!-- A page-level link, not part of either list below: both of them are
+       filtered views (a window over the buffer, and the kept entries that
+       have not been archived), and the full history is where the rest of
+       both live. -->
+  <h1>vinyl-archive <a class="nav" href="/history">History →</a></h1>
   <div id="status-bar">
     <span id="capture-state" class="badge">--</span>
     <div class="meter" title="Input level">
@@ -63,12 +67,12 @@ passages can clip on output.">
       </label>
     </div>
     <h3 class="list-head">In the buffer
-      <span class="dim">— temporary, and waiting for a decision</span></h3>
+      <span class="dim">— the newest few, waiting for a decision</span></h3>
     <div id="buffered" class="list"></div>
-    <a class="more" href="/history">Full history →</a>
 
     <h3 class="list-head">Kept
-      <span class="dim">— permanent, until you delete them</span></h3>
+      <span class="dim">— permanent; <b>Archive</b> files one away without
+      deleting it</span></h3>
     <div id="kept" class="list"></div>
   </section>
 

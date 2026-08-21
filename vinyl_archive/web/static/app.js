@@ -109,7 +109,8 @@ async function refresh() {
   try {
     const [status, history] = await Promise.all([
       api("/api/status"),
-      api(`/api/history?buffered_limit=${BUFFERED_LIMIT}`),
+      api(`/api/history?buffered_limit=${BUFFERED_LIMIT}`
+          + "&include_archived=false"),
     ]);
     renderStatus(status);
     // Split on permanence, not on type: a session being written out is still
@@ -119,7 +120,8 @@ async function refresh() {
                `Nothing in the buffer. Play a record and it shows up here on
                 its own.`);
     renderList($("kept"), keptRows, history.filter((i) => i.permanent),
-               "Nothing kept yet. Press Keep on an entry above.");
+               `Nothing kept yet — or everything kept has been archived, in
+                which case it is in the <a href="/history">history</a>.`);
   } catch (e) {
     $("capture-state").textContent = "Connection error";
     $("capture-state").className = "badge stopped";

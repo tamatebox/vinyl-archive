@@ -27,13 +27,15 @@ the safety net for the times you forget to press record. Press **Record** to
 mark a take explicitly; that takes precedence over detection and is also the
 only way to capture something quieter than the detector's threshold. Every
 entry, explicit or automatic, can be played and downloaded straight away.
-The front page lists only the newest few buffered entries, so it stays the
-length of one sitting however long you leave it alone; **Full history** (`/history`)
-lists everything the buffer still holds along with every recording you kept,
-grouped by day with a month calendar above it — pick a day to see just that
-day, and the greyed-out cells show how far back the buffer still reaches.
-Nothing is pruned to keep the front page short, and there is no button that
-hides an entry: older ones are simply one page away.
+The front page keeps the two apart: **In the buffer** lists only the newest
+few, so it stays the length of one sitting however long you leave it alone,
+and **Kept** lists the recordings you have not filed away. **History**
+(`/history`) has all of both, a month at a time, grouped by day with a
+calendar above it — pick a day to see just that day, and the greyed-out cells
+show how far back the buffer still reaches. Nothing is pruned to keep the
+front page short: **Archive** on a kept entry takes it off the front page and
+changes nothing else, for transfers already copied off the Pi, and deleting is
+offered in the history rather than on the page you use every day.
 Entries you **Keep** become permanent FLAC files — one click, no dialog, and
 **Rename** gives them a name whenever you get around to it; the rest are
 eventually reclaimed as the buffer fills.
@@ -226,14 +228,14 @@ screen shows no seam around the icon.
 | Method & path | Description |
 |---|---|
 | `GET /api/status` | Capture state, input level, buffer fill, disk free, format |
-| `GET /api/history` | Sessions and kept recordings as one timeline, with playback `gain_db` (`?buffered_limit=N` for the front page's window) |
+| `GET /api/history` | Sessions and kept recordings as one timeline, with playback `gain_db` (`?buffered_limit=N` and `?include_archived=false` give the front page's scope) |
 | `POST /api/record/start` / `stop` | Explicit recording (wins over detection) |
 | `GET /api/sessions/{id}/audio` | Stream a buffered session as WAV (Range OK) |
 | `GET /api/sessions/{id}/download` | Download a buffered session as FLAC (no Range) |
 | `POST /api/sessions/{id}/save` | Keep a session as FLAC (async, 202) |
 | `GET /api/sessions` | Detected sessions (newest first) |
 | `GET /api/recordings` | Kept recordings |
-| `PATCH /api/recordings/{id}` | Rename (`{"label": "..."}`) |
+| `PATCH /api/recordings/{id}` | Rename (`{"label": "..."}`) or archive (`{"archived": true}`) |
 | `GET /api/recordings/{id}/download` | Download the FLAC |
 | `DELETE /api/recordings/{id}` | Delete a kept recording |
 | `POST /api/capture/start` / `stop` | Pause/resume continuous capture |

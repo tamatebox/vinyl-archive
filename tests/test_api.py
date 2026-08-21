@@ -64,6 +64,56 @@ def test_history_page_serves_ui(client):
     assert "History" in res.text
 
 
+def test_archiving_hides_a_recording_from_the_front_page_only(client, config):
+    """Archive is about where an entry is listed, nothing else.
+
+    The row, the file and the audio all stay exactly as they were; only the
+    front page's scoped view drops it. That is what makes it safe to offer
+    without a confirmation.
+    """
+    sid = seed_session(client.app, config)
+    client.post(f"/api/sessions/{sid}/save", json={"label": "Side A"})
+    rec = wait_for(lambda: client.get("/api/recordings").json())[0]
+    path = config.recordings_dir / rec["filename"]
+    size = path.stat().st_size
+
+    front = "/api/history?buffered_limit=5&include_archived=false"
+    assert [i["id"] for i in client.get(front).json()] == [rec["id"]]
+    assert client.get("/api/history").json()[0]["archived"] is False
+
+    res = client.patch(f"/api/recordings/{rec['id']}", json={"archived": True})
+    assert res.status_code == 200
+    assert res.json()["archived_at"] is not None
+
+    assert client.get(front).json() == []                    # off the front page
+    entry = client.get("/api/history").json()[0]             # still in the history
+    assert entry["archived"] is True
+    assert entry["id"] == rec["id"]
+    assert path.stat().st_size == size                       # file untouched
+    assert client.get(entry["download_url"]).status_code == 200
+
+    client.patch(f"/api/recordings/{rec['id']}", json={"archived": False})
+    assert [i["id"] for i in client.get(front).json()] == [rec["id"]]
+
+
+def test_patch_recording_leaves_untouched_fields_alone(client, config):
+    """Renaming must not unarchive, and archiving must not clear a name."""
+    sid = seed_session(client.app, config)
+    client.post(f"/api/sessions/{sid}/save", json={"label": "Side A"})
+    rec = wait_for(lambda: client.get("/api/recordings").json())[0]
+
+    client.patch(f"/api/recordings/{rec['id']}", json={"archived": True})
+    after = client.patch(f"/api/recordings/{rec['id']}",
+                         json={"label": "Side B"}).json()
+    assert after["label"] == "Side B"
+    assert after["archived_at"] is not None
+
+    after = client.patch(f"/api/recordings/{rec['id']}",
+                         json={"archived": False}).json()
+    assert after["label"] == "Side B"
+    assert after["archived_at"] is None
+
+
 def test_ui_assets_always_revalidate(client):
     """A page and the scripts it loads are only versioned by being fetched
     together, so neither may be served from cache without asking: an update

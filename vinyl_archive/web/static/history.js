@@ -6,9 +6,11 @@
 // Loaded once instead of polled — nothing here is live, and a page you are
 // reading while listening should not reshuffle under you. Actions reload it.
 //
-// The calendar is an index over the list, not a separate view: with no day
-// selected the list shows everything, so the continuous scroll is always
-// available and nothing is reachable only through the grid.
+// The calendar is an index over the list, not a separate view: the list below
+// holds the month on display, grouped by day, and picking a day narrows it to
+// that day. Scoping the list to the month is what makes ‹ › mean something —
+// and it bounds the list by a unit that is the same size whatever the buffer
+// happens to hold.
 
 const rows = new Map();  // key -> {el, parts, status}
 
@@ -26,6 +28,9 @@ const keyOfDate = (d) =>
 
 const firstOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 const monthKey = (d) => d.getFullYear() * 12 + d.getMonth();
+const monthOf = (dayKey) => dayKey.slice(0, 7);          // "2026-08"
+const monthLabel = (d) =>
+  d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 const dateOfKey = (key) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -61,8 +66,7 @@ function renderCalendar() {
   nav.className = "cal-nav";
   const label = document.createElement("span");
   label.className = "cal-month";
-  label.textContent = viewMonth.toLocaleDateString("en-US",
-    { month: "long", year: "numeric" });
+  label.textContent = monthLabel(viewMonth);
   const step = (delta) => {
     const btn = document.createElement("button");
     btn.className = "secondary";
@@ -73,7 +77,8 @@ function renderCalendar() {
     btn.disabled = delta < 0 ? shown <= minMonth : shown >= maxMonth;
     btn.onclick = () => {
       viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + delta, 1);
-      renderCalendar();
+      selectedDay = null;   // the day picked belonged to the month left behind
+      render();
     };
     return btn;
   };
@@ -152,6 +157,10 @@ function renderSelection() {
 function select(day) {
   selectedDay = day;
   if (day) viewMonth = firstOfMonth(dateOfKey(day));
+  render();
+}
+
+function render() {
   renderCalendar();
   renderSelection();
   renderItems();
@@ -160,18 +169,19 @@ function select(day) {
 // -- list ---------------------------------------------------------------------
 
 function renderItems() {
-  const shown = selectedDay
-    ? items.filter((i) => localDayKey(i.start_utc) === selectedDay)
-    : items;
+  const month = keyOfDate(viewMonth).slice(0, 7);
+  const shown = items.filter((i) => {
+    const day = localDayKey(i.start_utc);
+    return selectedDay ? day === selectedDay : monthOf(day) === month;
+  });
   // Day headings only earn their place when more than one day is on screen.
   renderList($("history"), rows, shown,
              selectedDay
                ? "Nothing on this day any more."
-               : `Nothing captured yet. Play a record and it shows up here on
-                  its own.`,
+               : `Nothing captured in ${monthLabel(viewMonth)}.`,
              !selectedDay);
   $("count").textContent = items.length
-    ? `${items.length} ${items.length === 1 ? "entry" : "entries"}`
+    ? `${shown.length} of ${items.length} ${items.length === 1 ? "entry" : "entries"}`
     : "";
 }
 
@@ -188,7 +198,11 @@ async function load() {
   // page filtered to nothing with no obvious way back.
   if (selectedDay && !counts.has(selectedDay)) selectedDay = null;
   if (selectedDay) viewMonth = firstOfMonth(dateOfKey(selectedDay));
-  else if (!viewMonth) viewMonth = firstOfMonth(new Date());
+  else if (!viewMonth) {
+    viewMonth = firstOfMonth(items.length
+      ? dateOfKey(localDayKey(items[0].start_utc))   // newest first from the API
+      : new Date());
+  }
   // A reload must not snap the month back: Keep and Rename both reload, and
   // losing your place mid-browse would be worse than the action was useful.
   // The oldest day can move forward though, so the view still has to be
@@ -199,11 +213,10 @@ async function load() {
     if (monthKey(viewMonth) < monthKey(low)) viewMonth = low;
     if (monthKey(viewMonth) > monthKey(high)) viewMonth = high;
   }
-  renderCalendar();
-  renderSelection();
-  renderItems();
+  render();
 }
 
+actionScope = "history";   // deleting is offered here, not on the front page
 $("btn-reload").onclick = load;
 onMutated = load;
 initPlaybackBar();
