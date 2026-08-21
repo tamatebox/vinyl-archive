@@ -119,9 +119,12 @@ async function refresh() {
     renderList($("buffered"), bufferedRows, history.filter((i) => !i.permanent),
                `Nothing in the buffer. Play a record and it shows up here on
                 its own.`);
+    // No link in here: the "Full history" link sits directly below this
+    // list, so an inline one would be the same destination offered twice in
+    // two adjacent lines.
     renderList($("kept"), keptRows, history.filter((i) => i.permanent),
                `Nothing kept yet — or everything kept has been archived, in
-                which case it is in the <a href="/history">history</a>.`);
+                which case it is in the full history below.`);
   } catch (e) {
     $("capture-state").textContent = "Connection error";
     $("capture-state").className = "badge stopped";
