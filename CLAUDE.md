@@ -15,7 +15,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'   # setup
 VINYL_ARCHIVE_CONFIG=dev-config.toml .venv/bin/python -m vinyl_archive   # dev server
 ```
 
-No linter/formatter is configured. Tests run at 8 kHz sample rate (conftest.py) to stay fast.
+No linter/formatter is configured. Tests run at 8 kHz sample rate (conftest.py) to stay fast. `tests/test_e2e.py` drives one pass through the real thing — a `[capture] command` subprocess writing PCM, the detector finding a session in it, export, archive, trash, purge — so the layers are checked against each other and not only against their own mocks. Its generator never exits and never stops writing on purpose: EOF restarts the source and adds a second session, while a source that goes quiet without closing its pipe leaves the capture thread blocked in `read()` and makes `manager.shutdown()` wait out its 10 s join timeout (which is worth knowing about for real restarts too — nothing stops the source subprocess from the shutdown path). `tests/test_web.py` covers the browser half from Python, since node is not a dependency here: it asserts that every element the page scripts look up exists in the markup that loads them. That is the one failure this UI has actually had — renaming a container broke both lists, and because the render error is swallowed by the polling loop it looked like a blank page rather than an error.
 
 For end-to-end testing without ALSA hardware, override `[capture] command` in config with any command that writes raw S16_LE PCM to stdout — `tools/make_test_audio.sh` (requires ffmpeg) generates a silence/tone/gap pattern that exercises the detector.
 
